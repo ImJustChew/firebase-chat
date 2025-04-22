@@ -1,5 +1,5 @@
 import { auth, db } from "@/config/firebase";
-import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy } from 'firebase/firestore';
+import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId } from 'firebase/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 
@@ -14,15 +14,10 @@ type Room = {
     id: string
     title: string
     members: string[]
-    teaser?: {
-        message: string
-        username: string
-        user: string,
-        date: Timestamp
-    }
+    teaser?: Message
 }
 
-type User = {
+export type User = {
     id: string
     address: string
     email: string
@@ -51,8 +46,13 @@ const roomsConverter: FirestoreDataConverter<Room> = {
 }
 
 export const useRoomsCol = () => {
-    return useCollectionData<Room>(
-        query(collection(db, "rooms").withConverter(roomsConverter)),
+    const [user] = useAuthState(auth);
+    return useCollectionData<Room>(user ?
+        query(
+            collection(db, "rooms").withConverter(roomsConverter),
+            where('members', 'array-contains', user?.uid || ""),
+            orderBy('teaser.timestamp', 'desc'),
+        ) : undefined,
     );
 }
 
@@ -72,7 +72,7 @@ export type Attachment = {
     name: string
     size: number
 }
-type Message = {
+export type Message = {
     id: string
     content: string
     user: {
@@ -80,10 +80,9 @@ type Message = {
         username: string
         profilePicture?: string
     }
-    date: Timestamp,
     attachments?: Attachment[]
     isDeleted?: boolean
-    timestamp: Timestamp
+    timestamp?: Timestamp // firebase optimistic timestamp might be null
 }
 
 const messagesConverter: FirestoreDataConverter<Message> = {
@@ -91,7 +90,6 @@ const messagesConverter: FirestoreDataConverter<Message> = {
         return {
             content: data.content,
             user: data.user,
-            date: data.date,
             attachments: data.attachments,
             isDeleted: data.isDeleted,
             timestamp: data.timestamp,
@@ -103,7 +101,6 @@ const messagesConverter: FirestoreDataConverter<Message> = {
             id: snapshot.id,
             content: data.content,
             user: data.user,
-            date: data.date,
             attachments: data.attachments,
             isDeleted: data.isDeleted,
             timestamp: data.timestamp,
@@ -115,7 +112,7 @@ export const useRoomMessagesCol = (roomId: string) => {
     return useCollectionData<Message>(
         query(
             collection(db, "rooms", roomId, "messages").withConverter(messagesConverter),
-            orderBy("date", "asc")
+            orderBy("timestamp", "asc")
         ),
     );
 }
@@ -152,4 +149,81 @@ export const createRoom = async (room: Omit<Room, "id">) => {
     const roomRef = doc(collection(db, "rooms"));
     await setDoc(roomRef, room);
     return roomRef.id;
+}
+
+export const useSendMessage = (roomId: string) => {
+    const [user] = useAuthState(auth);
+    const userDoc = useUserDoc();
+    const userData = userDoc[0] as User;
+    const userId = user?.uid || userData?.id || "";
+    const username = user?.displayName || userData?.username || "Unknown User";
+    const profilePicture = user?.photoURL || userData?.profilePicture || "/placeholder.svg?height=200&width=200";
+
+    return async (message: Omit<Message, "id" | "user" | "timestamp">) => {
+        const messageRef = doc(collection(db, "rooms", roomId, "messages"));
+        const messageData: Message = {
+            ...message,
+            id: messageRef.id,
+            timestamp: Timestamp.now(),
+            user: {
+                id: userId,
+                username,
+                profilePicture,
+            },
+        }
+        await setDoc(messageRef, messageData);
+        await setDoc(doc(db, "rooms", roomId), {
+            teaser: messageData
+        }, { merge: true });
+        return messageRef.id;
+    }
+}
+
+export const useDeleteMessage = (roomId: string) => {
+    const [user] = useAuthState(auth);
+    const userDoc = useUserDoc();
+    const userData = userDoc[0] as User;
+    const userId = user?.uid || userData?.id || "";
+    const username = user?.displayName || userData?.username || "Unknown User";
+    const profilePicture = user?.photoURL || userData?.profilePicture || "/placeholder.svg?height=200&width=200";
+
+    return async (messageId: string) => {
+        const messageRef = doc(db, "rooms", roomId, "messages", messageId);
+        await setDoc(messageRef, {
+            isDeleted: true,
+            content: "This message has been deleted",
+            user: {
+                id: userId,
+                username,
+                profilePicture,
+            },
+        }, { merge: true });
+        // if teaser is the same as the deleted message, set to message deleted
+        const roomData = await getDoc(doc(db, "rooms", roomId)).then((doc) => doc.data()) as Room;
+        if (roomData?.teaser?.id === messageId) {
+            await setDoc(doc(db, "rooms", roomId), {
+                teaser: {
+                    isDeleted: true,
+                    content: "This message has been deleted",
+                    user: {
+                        id: userId,
+                        username,
+                        profilePicture,
+                    },
+                }
+            }, { merge: true });
+        }
+        return messageRef.id;
+    }
+}
+
+export const useRoomParticipants = (roomId: string) => {
+    const [roomDoc] = useRoomDoc(roomId);
+    const participants = roomDoc?.members || [];
+    return useCollectionData<User>(participants.length > 0 ?
+        query(
+            collection(db, "users").withConverter(usersConverter),
+            where(documentId(), "in", participants),
+        ) : undefined
+    );
 }

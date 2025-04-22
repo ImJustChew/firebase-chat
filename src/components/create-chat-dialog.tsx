@@ -38,12 +38,13 @@ export default function CreateChatDialog({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        if (!user) return
 
         if (!chatName.trim() || selectedFriends.length === 0) return
 
         await createRoom({
             title: chatName,
-            members: selectedFriends,
+            members: [...selectedFriends, user.uid],
         })
 
         // Reset form

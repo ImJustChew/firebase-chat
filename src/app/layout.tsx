@@ -28,18 +28,28 @@ const inter = Inter({
 });
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const [rooms = [], loading, error] = useRoomsCol();
-  if (error) console.error(error);
+  const [unsortedRoom = [], loading, error] = useRoomsCol();
   const [user, loadingUser, errorUser] = useUserDoc();
   const { theme, setTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
+
 
   const isMobile = useIsMobile();
   const pathname = usePathname();
   const router = useRouter();
 
-  const roomId = pathname.split("/")[1];
+  const rooms = unsortedRoom.sort((a, b) => {
+    // Pin rooms without teasers (newly created) at the top
+    if (!a.teaser && b.teaser) return -1;
+    if (a.teaser && !b.teaser) return 1;
+    // If both have teasers, sort by timestamp as before
+    if (a.teaser && b.teaser) {
+      return (b.teaser.timestamp?.toDate() ?? new Date()).getTime() - (a.teaser.timestamp?.toDate() ?? new Date()).getTime();
+    }
+    return 0;
+  });
 
+  const roomId = pathname.split("/")[1];
   // Create Fuse instance for fuzzy searching
   const fuse = useMemo(() => new Fuse(rooms, {
     keys: ['title', 'teaser.content', 'teaser.user.username'],
@@ -96,10 +106,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <span className="font-medium">{room.title}</span>{" "}
                     {room.teaser && <span className="ml-auto text-xs">{formatDistanceToNow(room.teaser.timestamp?.toDate() ?? new Date(), {})}</span>}
                   </div>
-                  {room.teaser && <span className="line-clamp-2 w-[260px] whitespace-break-spaces text-xs">
-                    <span className="font-medium">{room.teaser.user?.username}: </span>
-                    {room.teaser.content}
-                  </span>}
+                  {room.teaser ? (
+                    <span className="line-clamp-2 w-[260px] whitespace-break-spaces text-xs">
+                      <span className="font-medium">{room.teaser.user?.username}: </span>
+                      {room.teaser.content}
+                    </span>
+                  ) : (
+                    <span className="line-clamp-2 w-[260px] whitespace-break-spaces text-xs text-muted-foreground">
+                      It's kinda chilly here...
+                    </span>
+                  )}
                 </Link>
               ))
             ) : (

@@ -82,7 +82,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
                 </div>
             </form>
 
-            <ScrollArea className="flex-1 p-3">
+            <ScrollArea className="flex-1 p-3 h-full overflow-auto">
                 {loading ? (
                     <div className="flex justify-center items-center h-full">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -98,7 +98,7 @@ export default function GifPicker({ onSelect, onClose }: GifPickerProps) {
                                 <img
                                     src={gif.media_formats.tinygif.url || "/placeholder.svg"}
                                     alt={gif.title}
-                                    className="w-full h-auto object-cover"
+                                    className="w-full h-32 object-cover"
                                     loading="lazy"
                                 />
                             </div>

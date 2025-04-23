@@ -50,8 +50,7 @@ export const useRoomsCol = () => {
     return useCollectionData<Room>(user ?
         query(
             collection(db, "rooms").withConverter(roomsConverter),
-            where('members', 'array-contains', user?.uid || ""),
-            orderBy('teaser.timestamp', 'desc'),
+            where('members', 'array-contains', user.uid || ""),
         ) : undefined,
     );
 }
@@ -155,18 +154,20 @@ export const useSendMessage = (roomId: string) => {
     const [user] = useAuthState(auth);
     const userDoc = useUserDoc();
     const userData = userDoc[0] as User;
-    const userId = user?.uid || userData?.id || "";
-    const username = user?.displayName || userData?.username || "Unknown User";
-    const profilePicture = user?.photoURL || userData?.profilePicture || "/placeholder.svg?height=200&width=200";
+    const username = userData.username;
+    const profilePicture = userData?.profilePicture || "/placeholder.svg?height=200&width=200";
 
     return async (message: Omit<Message, "id" | "user" | "timestamp">) => {
+        if (!user) {
+            throw new Error("User not authenticated");
+        }
         const messageRef = doc(collection(db, "rooms", roomId, "messages"));
         const messageData: Message = {
             ...message,
             id: messageRef.id,
             timestamp: Timestamp.now(),
             user: {
-                id: userId,
+                id: user.uid,
                 username,
                 profilePicture,
             },

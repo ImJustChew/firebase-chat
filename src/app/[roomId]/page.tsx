@@ -22,6 +22,7 @@ import {
     Trash2,
     Users,
     Video,
+    Bell,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -75,6 +76,11 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     const [user, loadingUser, errorUser] = useAuthState(auth);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
+    // Add state for notification permission
+    const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(null);
+    const [lastMessageId, setLastMessageId] = useState<string | null>(null);
+    const [windowFocused, setWindowFocused] = useState<boolean>(true);
+
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [fileInputKey, setFileInputKey] = useState<number>(Date.now())
     const [uploadingFile, setUploadingFile] = useState<boolean>(false)
@@ -88,6 +94,92 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
 
     const sendMessage = useSendMessage(roomId);
     const deleteMessage = useDeleteMessage(roomId);
+
+    // If roomdoc loaded and no room, redirect to home
+    useEffect(() => {
+        if (loadingRoom) return;
+        if (!room && !loadingRoom) {
+            router.push("/");
+        }
+    }, [room, loadingRoom, router]);
+
+    // Request notification permission
+    const requestNotificationPermission = async () => {
+        console.log("Requesting notification permission...");
+        if (typeof window === "undefined") return; // Ensure this runs only in the browser
+        if (!("Notification" in window)) {
+            console.log("This browser does not support notifications");
+            return;
+        }
+
+        try {
+            const permission = await Notification.requestPermission();
+            setNotificationPermission(permission);
+        } catch (error) {
+            console.error("Error requesting notification permission:", error);
+        }
+    };
+
+    // Check if window is focused
+    useEffect(() => {
+        if (typeof window === "undefined") return; // Ensure this runs only in the browser
+        const handleFocus = () => setWindowFocused(true);
+        const handleBlur = () => setWindowFocused(false);
+
+        window.addEventListener('focus', handleFocus);
+        window.addEventListener('blur', handleBlur);
+
+        return () => {
+            window.removeEventListener('focus', handleFocus);
+            window.removeEventListener('blur', handleBlur);
+        };
+    }, []);
+
+    // Request notification permission on component mount
+    useEffect(() => {
+        if (typeof window === "undefined") return; // Ensure this runs only in the browser
+        if ("Notification" in window) {
+            setNotificationPermission(Notification.permission);
+
+            if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+                requestNotificationPermission();
+            }
+        }
+    }, []);
+
+    // Check for new messages and show notifications
+    useEffect(() => {
+        if (messages.length === 0 || loadingUser || !user) return;
+
+        const latestMessage = messages[messages.length - 1];
+
+        // If this is a new message, not from the current user, and window is not focused
+        if (
+            latestMessage &&
+            latestMessage.id !== lastMessageId &&
+            latestMessage.user.id !== user.uid &&
+            !windowFocused &&
+            notificationPermission === "granted"
+        ) {
+            // Create and show notification
+            const notification = new Notification(`${latestMessage.user.username} in ${room?.title}`, {
+                body: latestMessage.content || 'Sent an attachment',
+                icon: latestMessage.user.profilePicture || '/favicon.ico',
+            });
+
+            notification.onclick = () => {
+                window.focus();
+                notification.close();
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            // Update last message ID
+            setLastMessageId(latestMessage.id);
+        } else if (latestMessage && latestMessage.id !== lastMessageId) {
+            // Just update the last seen message ID if it's a new message but we don't need to notify
+            setLastMessageId(latestMessage.id);
+        }
+    }, [messages, user, loadingUser, windowFocused, notificationPermission, room, lastMessageId]);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -189,6 +281,23 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
 
             <div className="flex items-center gap-2">
                 <MessageSearch messages={messages} />
+
+                {notificationPermission !== "granted" && typeof window !== 'undefined' && "Notification" in window && <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="destructive"
+                                size="icon"
+                                suppressHydrationWarning={true}
+                                className="h-8 w-8"
+                                onClick={requestNotificationPermission}
+                            >
+                                <Bell className="h-4 w-4 animate-ring" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Enable Notifications</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>}
 
                 <TooltipProvider>
                     <Tooltip>

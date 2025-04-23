@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, X, UserPlus, MoreHorizontal, Shield, Ban } from "lucide-react"
+import { Search, X, UserPlus, MoreHorizontal, Shield, Ban, Bot } from "lucide-react"
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -16,7 +16,8 @@ import {
 import { toast } from "sonner"
 import { useAuthState } from "react-firebase-hooks/auth"
 import { auth } from "@/config/firebase"
-import { useBlockUser, useIsUserBlocked, useRoomMembers } from '@/hooks/firestore';
+import { useBlockUser, useIsUserBlocked, useRoomDoc, useRoomMembers } from '@/hooks/firestore';
+import { BOT_CONFIGS } from "@/services/bot-service"
 
 type User = {
     id: string
@@ -24,6 +25,7 @@ type User = {
     email: string
     profilePicture?: string
     status?: "online" | "idle" | "dnd" | "offline"
+    isBot?: boolean
 }
 
 type ParticipantsListProps = {
@@ -37,6 +39,7 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
     const [user] = useAuthState(auth);
     const blockUser = useBlockUser();
     const isUserBlocked = useIsUserBlocked();
+    const [roomDoc] = useRoomDoc(roomId)
 
     const [participants = [], loading, error] = useRoomMembers(roomId)
 
@@ -86,10 +89,10 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
                         const isBlocked = isUserBlocked(participant.id);
 
                         return (
-                            <div key={participant.id} className="flex items-center justify-between p-2 rounded-md hover:bg-secondary/50">
+                            <div key={participant.id} className={`flex items-center justify-between p-2 rounded-md hover:bg-secondary/50 `}>
                                 <div className="flex items-center gap-3">
                                     <div className="relative">
-                                        <Avatar className="h-8 w-8">
+                                        <Avatar className={`h-8 w-8`}>
                                             <AvatarImage src={participant.profilePicture || "/placeholder.svg"} alt={participant.username} />
                                             <AvatarFallback>{participant.username.charAt(0).toUpperCase()}</AvatarFallback>
                                         </Avatar>
@@ -137,6 +140,20 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
                             </div>
                         );
                     })}
+                    {roomDoc && roomDoc.bot && (
+                        <div className="flex items-center justify-between p-2 rounded-md hover:bg-secondary/50">
+                            <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                    <AvatarImage src={BOT_CONFIGS[roomDoc.bot].profilePicture} alt={BOT_CONFIGS[roomDoc.bot].name} />
+                                    <AvatarFallback>{BOT_CONFIGS[roomDoc.bot].name.charAt(0).toUpperCase()}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                    <p className="font-medium text-sm">{BOT_CONFIGS[roomDoc.bot].name}</p>
+                                </div>
+                            </div>
+                            <Bot className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                    )}
                 </div>
             </ScrollArea>
         </div>

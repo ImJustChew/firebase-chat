@@ -494,10 +494,12 @@ export async function sendBotMessage(roomId: string, botName: string, botDisplay
 
 export const useRoomMembers = (roomId: string) => {
     const [user] = useAuthState(auth);
-    return useCollectionData<User>(roomId ?
+    const [roomDoc] = useRoomDoc(roomId);
+
+    return useCollectionData<User>(roomDoc ?
         query(
-            collection(db, "rooms", roomId, "members").withConverter(usersConverter),
-            where(documentId(), "in", [user?.uid])
+            collection(db, "users").withConverter(usersConverter),
+            where(documentId(), "in", roomDoc.members),
         ) : undefined
     );
 }

@@ -47,6 +47,11 @@ interface RoomTeaser {
     isBot?: boolean;
 }
 
+const SHUT_UP_DEBUG = true;
+if (SHUT_UP_DEBUG) {
+    console.log("Lover is disabled. Please enable it in production.");
+}
+
 export function LoveProvider({ children }: { children: React.ReactNode }) {
     const [user] = useAuthState(auth);
     const [romanticBotRoomId, setRomanticBotRoomId] = useState<string>();
@@ -224,9 +229,10 @@ Split your reply into messagable chunks, using \n\n to separate them.`;
     // Listen to messages in the romantic bot room
     useEffect(() => {
         if (!user || !romanticBotRoomId || !messages.length) return;
-
+        if (SHUT_UP_DEBUG) return;
         // First message after page load should trigger welcome back
         if (isFirstLoad) {
+
             setIsFirstLoad(false);
 
             // Send welcome back message on page load (after a short delay)

@@ -15,14 +15,10 @@ import { DialogTrigger } from "@radix-ui/react-dialog"
 import { useUsersCol, createRoom, useIsUserBlocked } from '@/hooks/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { auth } from "@/config/firebase"
-import { Ban } from "lucide-react"
-
-type Friend = {
-    id: string
-    username: string
-    email: string
-    profilePicture?: string
-}
+import { Ban, Bot } from "lucide-react"
+import { toast } from "sonner"
+import { initUserBotRoom } from "@/services/bot-service"
+import { useRouter } from 'next/navigation'
 
 export default function CreateChatDialog({
     children,
@@ -32,9 +28,11 @@ export default function CreateChatDialog({
     const [chatName, setChatName] = useState("")
     const [selectedFriends, setSelectedFriends] = useState<string[]>([])
     const [open, setOpen] = useState(false)
+    const [creatingBotChat, setCreatingBotChat] = useState(false)
     const [users = [], loading, error] = useUsersCol();
     const [user] = useAuthState(auth);
     const isUserBlocked = useIsUserBlocked();
+    const router = useRouter();
 
     // Filter out the current user but keep blocked users visible
     const friends = users.filter(friend => friend.id !== user?.uid);
@@ -45,15 +43,23 @@ export default function CreateChatDialog({
 
         if (!chatName.trim() || selectedFriends.length === 0) return
 
-        await createRoom({
-            title: chatName,
-            members: [...selectedFriends, user.uid],
-        })
+        try {
+            const roomId = await createRoom({
+                title: chatName,
+                members: [...selectedFriends, user.uid],
+            });
 
-        // Reset form
-        setChatName("")
-        setSelectedFriends([])
-        setOpen(false)
+            // Reset form and close dialog
+            setChatName("");
+            setSelectedFriends([]);
+            setOpen(false);
+
+            // Navigate to the new room
+            router.push(`/${roomId}`);
+        } catch (error) {
+            console.error("Error creating chat:", error);
+            toast.error("Failed to create chat room");
+        }
     }
 
     const toggleFriend = (friendId: string, isBlocked: boolean) => {
@@ -67,6 +73,33 @@ export default function CreateChatDialog({
         ));
     }
 
+    const handleCreateBotChat = async () => {
+        if (!user || creatingBotChat) return;
+
+        try {
+            setCreatingBotChat(true);
+            // Pass a navigation callback to immediately redirect after creation
+            // Also pass null as specificBotName to use getRandomBotName with default exclusions
+            await initUserBotRoom(
+                user.uid,
+                (roomId) => {
+                    setCreatingBotChat(false); // Reset state before navigation
+                    setOpen(false); // Close the dialog first
+                    router.push(`/${roomId}`); // Then navigate
+                }
+            );
+        } catch (error) {
+            console.error("Error creating bot chat:", error);
+            toast.error("Failed to create AI chat companion");
+            setCreatingBotChat(false);
+        } finally {
+            // Ensure state is reset even if navigation fails
+            setTimeout(() => {
+                setCreatingBotChat(false);
+            }, 3000); // Safety timeout in case navigation doesn't happen
+        }
+    };
+
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -76,6 +109,32 @@ export default function CreateChatDialog({
                 <DialogHeader>
                     <DialogTitle>Create New Chat</DialogTitle>
                 </DialogHeader>
+
+                {/* Bot Chat Creation Button */}
+                <div className="bg-muted/50 rounded-lg p-4 mb-4">
+                    <div className="flex items-start gap-3">
+                        <div className="bg-primary/10 p-2 rounded-full">
+                            <Bot className="h-6 w-6 text-primary" />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-medium">Create AI Chat Companion</h4>
+                            <p className="text-sm text-muted-foreground mb-3">
+                                Start a private chat with an AI assistant that can answer questions and help with tasks.
+                            </p>
+                            <Button
+                                variant="outline"
+                                className="w-full"
+                                onClick={handleCreateBotChat}
+                                disabled={creatingBotChat}
+                            >
+                                {creatingBotChat ? "Creating AI Chat..." : "Create AI Chat"}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+
+                <Separator className="my-2" />
+
                 <form onSubmit={handleSubmit} className="space-y-4 py-2">
                     <div className="space-y-2">
                         <Label htmlFor="chatName">Chat Name</Label>

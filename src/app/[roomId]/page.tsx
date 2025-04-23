@@ -2,20 +2,13 @@
 import { Button } from "@/components/ui/button";
 import { DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { auth } from "@/config/firebase";
+import { auth, db } from "@/config/firebase";
 import { Dialog } from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import {
-    Attachment,
-    useDeleteMessage,
-    useRoomDoc,
-    useRoomMessagesCol,
-    useSendMessage,
-    useIsUserBlocked
-} from '@/hooks/firestore';
+import { Attachment, useDeleteMessage, useRoomDoc, useRoomMessagesCol, useSendMessage, useIsUserBlocked, sendBotMessage } from '@/hooks/firestore';
 import {
     AtSign,
     Bot,
@@ -39,6 +32,8 @@ import { useParams, useRouter } from "next/navigation";
 import GifPicker from "@/components/gif-picker";
 import ParticipantsList from "@/components/participants-list";
 import MessageSearch from "@/components/message-search";
+import { generateBotResponse, getBotConfig, generateAndSendBotResponses } from '@/services/bot-service';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 
 const AttachmentViewerDialog = ({ attachment, children }: { attachment: Attachment, children: React.ReactNode }) => {
     return (
@@ -95,8 +90,8 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
 
     const [newMessage, setNewMessage] = useState<string>("")
     const [showGifPicker, setShowGifPicker] = useState<boolean>(false)
-    const [typingUsers, setTypingUsers] = useState<string[]>([])
     const [showParticipants, setShowParticipants] = useState<boolean>(false)
+    const [isBotTyping, setIsBotTyping] = useState<boolean>(false);
 
     const router = useRouter();
 
@@ -188,6 +183,40 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
             setLastMessageId(latestMessage.id);
         }
     }, [messages, user, loadingUser, windowFocused, notificationPermission, room, lastMessageId]);
+
+    // Handle bot responses
+    useEffect(() => {
+        if (!room) return;
+        if (room.bot && messages.length > 0 && !loading && user) {
+            const lastMessage = messages[messages.length - 1];
+
+            // If the last message is from the user (not the bot), generate a bot response
+            if (lastMessage.user.id === user.uid) {
+                setIsBotTyping(true);
+
+                // Add a slight delay to make it feel more natural
+                const timer = setTimeout(async () => {
+                    try {
+                        if (!room.bot) return; // Ensure the bot is still present in the room
+
+                        // Use the enhanced function that handles sending messages to Firestore
+                        await generateAndSendBotResponses(
+                            roomId,
+                            room.bot,
+                            messages.slice(-10), // Use the last 10 messages for context
+                            lastMessage.content
+                        );
+                    } catch (error) {
+                        console.error("Error with bot response:", error);
+                    } finally {
+                        setIsBotTyping(false);
+                    }
+                }, 1000 + Math.random() * 1500); // Random delay between 1-2.5 seconds
+
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [messages, room, loading, user, roomId]);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -285,6 +314,14 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                 <h2 className="font-semibold">
                     {room?.title}
                 </h2>
+                {room?.bot && (
+                    <div className="ml-2 px-1.5 py-0.5 text-xs bg-primary/10 text-primary rounded">
+                        <div className="flex items-center gap-1">
+                            <Bot className="h-3 w-3" />
+                            <span>AI Bot</span>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="flex items-center gap-2" suppressHydrationWarning={true} >
@@ -306,20 +343,22 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                     </Tooltip>
                 </TooltipProvider>}
 
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                            >
-                                <Bot className="h-4 w-4" />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Chatbot</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
+                {!room?.bot && (
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                >
+                                    <Bot className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Chatbot</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                )}
 
                 <TooltipProvider>
                     <Tooltip>
@@ -543,6 +582,17 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                             )
                         })
                     )}
+                    {/* Bot typing indicator */}
+                    {isBotTyping && (
+                        <div className="flex items-center gap-2 pl-14 text-muted-foreground">
+                            <div className="flex space-x-1">
+                                <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: "0s" }}></div>
+                                <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: "0.2s" }}></div>
+                                <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: "0.4s" }}></div>
+                            </div>
+                            <span className="text-xs">Bot is typing...</span>
+                        </div>
+                    )}
                     <div ref={messagesEndRef} />
                 </div>
             </ScrollArea>
@@ -560,94 +610,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
         {/* Message input */}
         <div className="px-4 pb-6 pt-2">
             <form onSubmit={handleSendMessage} className="relative">
-                <div className="flex items-center bg-secondary/70 rounded-md px-4 focus-within:ring-1 focus-within:ring-primary">
-                    <div className="flex gap-1">
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-10 w-10 text-muted-foreground hover:text-foreground"
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={uploadingFile}
-                                    >
-                                        <Plus className="h-5 w-5" />
-                                        <input
-                                            aria-label="Upload File"
-                                            type="file"
-                                            ref={fileInputRef}
-                                            key={fileInputKey}
-                                            className="hidden"
-                                            accept="image/*,video/*,application/*"
-                                            onChange={handleFileUpload}
-                                            disabled={uploadingFile}
-                                        />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Upload File</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-10 w-10 text-muted-foreground hover:text-foreground"
-                                        onClick={() => {
-                                            const input = document.createElement("input")
-                                            input.type = "file"
-                                            input.accept = "image/*"
-                                            input.onchange = (e) => {
-                                                const file = (e.target as HTMLInputElement).files?.[0]
-                                                if (file) {
-                                                    handleFileUpload({ target: { files: [file] } } as any)
-                                                }
-                                            }
-                                            input.click()
-                                        }}
-                                        disabled={uploadingFile}
-                                    >
-                                        <ImageIcon className="h-5 w-5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Upload Image</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-10 w-10 text-muted-foreground hover:text-foreground"
-                                        onClick={() => {
-                                            const input = document.createElement("input")
-                                            input.type = "file"
-                                            input.accept = "video/*"
-                                            input.onchange = (e) => {
-                                                const file = (e.target as HTMLInputElement).files?.[0]
-                                                if (file) {
-                                                    handleFileUpload({ target: { files: [file] } } as any)
-                                                }
-                                            }
-                                            input.click()
-                                        }}
-                                        disabled={uploadingFile}
-                                    >
-                                        <Video className="h-5 w-5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Upload Video</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
+                <div className="flex items-center bg-secondary/70 rounded-md px-1 focus-within:ring-1 focus-within:ring-primary">
 
                     <Input
                         value={newMessage}
@@ -673,49 +636,17 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                                 <TooltipContent>Send GIF</TooltipContent>
                             </Tooltip>
                         </TooltipProvider>
-
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-10 w-10 text-muted-foreground hover:text-foreground"
-                                    >
-                                        <AtSign className="h-5 w-5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Mention</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-10 w-10 text-muted-foreground hover:text-foreground"
-                                    >
-                                        <Smile className="h-5 w-5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Emoji</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
+                        <Button
+                            type="submit"
+                            size="icon"
+                            className="h-8 w-8 rounded-full bg-primary text-primary-foreground"
+                            disabled={!newMessage.trim() || uploadingFile}
+                        >
+                            <Send className="h-4 w-4" />
+                        </Button>
                     </div>
                 </div>
 
-                <Button
-                    type="submit"
-                    size="icon"
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-8 w-8 rounded-full bg-primary text-primary-foreground"
-                    disabled={!newMessage.trim() || uploadingFile}
-                >
-                    <Send className="h-4 w-4" />
-                </Button>
             </form>
         </div>
 

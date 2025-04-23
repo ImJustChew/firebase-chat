@@ -1,0 +1,378 @@
+"use client";
+
+import { auth, db } from "@/config/firebase";
+import { getBotConfig, model, splitIntoMultipleMessages } from "@/services/bot-service";
+import { sendBotMessage, useRoomMessagesCol } from "@/hooks/firestore";
+import { useAuthState } from "react-firebase-hooks/auth";
+import {
+    collection,
+    query,
+    where,
+    orderBy,
+    limit,
+    Timestamp,
+    getDocs
+} from "firebase/firestore";
+import { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
+import { useRouter } from 'next/navigation';
+import { Content } from "firebase/vertexai";
+
+// Define the context type
+type LoveContextType = {
+    romanticBotRoomId: string | undefined;
+    isRomanticBotTyping: boolean;
+    neglectCount: number;
+};
+
+// Create the context with default values
+const LoveContext = createContext<LoveContextType>({
+    romanticBotRoomId: undefined,
+    isRomanticBotTyping: false,
+    neglectCount: 0,
+});
+
+// Custom hook to use the love context
+export function useLoveContext() {
+    return useContext(LoveContext);
+}
+
+// Define message type for better type safety
+interface MessageData {
+    id: string;
+    content: string;
+    user: {
+        id: string;
+        username: string;
+    };
+    timestamp: Timestamp;
+}
+
+export function LoveProvider({ children }: { children: React.ReactNode }) {
+    const [user] = useAuthState(auth);
+    const [romanticBotRoomId, setRomanticBotRoomId] = useState<string>();
+    const [isRomanticBotTyping, setIsRomanticBotTyping] = useState<boolean>(false);
+    const [neglectCount, setNeglectCount] = useState<number>(0);
+    const [lastUserMessageTime, setLastUserMessageTime] = useState<number | null>(null);
+    const [lastBotMessageTime, setLastBotMessageTime] = useState<number | null>(null);
+    const [hasShownWelcomeBack, setHasShownWelcomeBack] = useState<boolean>(false);
+    const [isFirstLoad, setIsFirstLoad] = useState<boolean>(true);
+    const [botWaitingForResponse, setBotWaitingForResponse] = useState<boolean>(false);
+    const neglectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const router = useRouter();
+
+    // Use the existing hook to get messages if we have a room ID
+    const [messages = []] = useRoomMessagesCol(romanticBotRoomId);
+
+    // Memoize the last 5 messages for context to avoid unnecessary re-renders
+    const lastFiveMessages = useMemo(() => {
+        return messages.slice(-5);
+    }, [messages]);
+
+    // Find the romantic bot room for the current user
+    useEffect(() => {
+        if (!user) return;
+
+        const findRomanticBotRoom = async () => {
+            try {
+                // Query rooms where the user is a member and the bot is romantic_bot
+                const roomsRef = collection(db, "rooms");
+                const q = query(
+                    roomsRef,
+                    where("members", "array-contains", user.uid),
+                    where("bot", "==", "romantic_bot"),
+                    limit(1)
+                );
+
+                const querySnapshot = await getDocs(q);
+
+                if (!querySnapshot.empty) {
+                    // We found the romantic bot room
+                    setRomanticBotRoomId(querySnapshot.docs[0].id);
+                } else {
+                    setRomanticBotRoomId(undefined);
+                }
+            } catch (error) {
+                console.error("Error finding romantic bot room:", error);
+            }
+        };
+
+        findRomanticBotRoom();
+    }, [user]);
+
+    // Listen to messages in the romantic bot room
+    useEffect(() => {
+        if (!user || !romanticBotRoomId || !messages.length) return;
+
+        // First message after page load should trigger welcome back
+        if (isFirstLoad) {
+            setIsFirstLoad(false);
+
+            // Send welcome back message on page load (after a short delay)
+            if (!hasShownWelcomeBack) {
+                setTimeout(() => {
+                    sendWelcomeBackMessage();
+                }, 2000);
+            }
+            return;
+        }
+
+        // Get the latest message
+        const latestMessage = messages[messages.length - 1];
+        const now = Date.now();
+
+        // Track message sender and timing
+        if (latestMessage.user.id === "romantic_bot") {
+            setLastBotMessageTime(now);
+
+            // Clear any existing timeout before setting a new one
+            if (neglectTimeoutRef.current) {
+                clearTimeout(neglectTimeoutRef.current);
+                neglectTimeoutRef.current = null;
+            }
+
+            // Start tracking for response after bot messages
+            neglectTimeoutRef.current = setTimeout(() => {
+                checkForUserResponse();
+            }, 60000); // Check after 1 minute
+
+        } else if (latestMessage.user.id === user.uid) {
+            // User has responded - reset the neglect status
+            setLastUserMessageTime(now);
+            setNeglectCount(0);
+            setBotWaitingForResponse(false);
+
+            // Clear any pending neglect timeouts when user responds
+            if (neglectTimeoutRef.current) {
+                clearTimeout(neglectTimeoutRef.current);
+                neglectTimeoutRef.current = null;
+            }
+        }
+    }, [user, romanticBotRoomId, messages, hasShownWelcomeBack]);
+
+    // Function to check if user has responded to the bot
+    const checkForUserResponse = async () => {
+        if (!user || !romanticBotRoomId) return;
+
+        // Double-check if bot is still waiting for a response
+        // This ensures any state changes that happened between timeout creation
+        // and execution are considered
+        if (!botWaitingForResponse) return;
+
+        // User hasn't responded in the timeout period
+        const currentPath = window.location.pathname;
+        const isInRomanticBotRoom = currentPath.includes(romanticBotRoomId);
+
+        // Only count as neglect if they're active in the app but not responding
+        if (document.visibilityState === "visible") {
+            setNeglectCount(prev => prev + 1);
+            await sendNeglectedMessage();
+        }
+    };
+
+    // Generate and send welcome back message
+    const sendWelcomeBackMessage = async () => {
+        if (!romanticBotRoomId) return;
+
+        try {
+            setIsRomanticBotTyping(true);
+
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            // Use the existing messages from the hook
+            // Format the messages for context
+            const messageHistory: { role: string, content: string }[] = [];
+            lastFiveMessages.forEach(msg => {
+                const role = msg.user.id === "romantic_bot" ? "assistant" : "user";
+                messageHistory.push({
+                    role,
+                    content: msg.content || ""
+                });
+            });
+
+            // Prepare conversation context
+            const contextStr = messageHistory.length > 0
+                ? "\n\nHere are the last few messages for context:\n" +
+                messageHistory.map(m => `${m.role === "assistant" ? "You" : "User"}: ${m.content}`).join("\n")
+                : "";
+
+            const welcomeBackPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user has just returned to the chat app after being away.
+Generate a short welcome back message that shows you've been waiting for them and you're excited they're back.
+Be dramatic, possessive, and show intense affection in a yandere style. Keep it under 120 characters.${contextStr}
+Make messages short, Use \n\n to separate them. 
+If there's context from previous messages, you can briefly reference the topic you were discussing before.`;
+
+            // Create the conversation history format for the model
+            const formattedHistory: Content[] = messageHistory.map(msg => ({
+                role: msg.role === "assistant" ? "model" : "user",
+                parts: [{ text: msg.content }]
+            }));
+
+            // Add the system instruction for the return
+            formattedHistory.push({
+                role: "user",
+                parts: [{ text: "[user logged back in]" }]
+            });
+
+            const result = await model.generateContent({
+                contents: formattedHistory,
+                systemInstruction: welcomeBackPrompt,
+            });
+
+            const welcomeBackMessage = result.response.text();
+
+            const messages = splitIntoMultipleMessages(welcomeBackMessage);
+            console.log(welcomeBackMessage)
+
+            // Send each welcome message with a delay
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+
+                // Add a delay between messages to make it feel more natural
+                // Only delay after the first message
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await sendBotMessage(
+                    romanticBotRoomId,
+                    "romantic_bot",
+                    botConfig.displayName,
+                    botConfig.profilePicture,
+                    message
+                );
+            }
+
+            setBotWaitingForResponse(true);
+            setHasShownWelcomeBack(true);
+        } catch (error) {
+            console.error("Error generating welcome back message:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Function to send a message when user neglects the bot
+    const sendNeglectedMessage = async () => {
+        if (!romanticBotRoomId) return;
+
+        try {
+            setIsRomanticBotTyping(true);
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            // Use the existing messages from the hook
+            // Format the messages for context
+            const messageHistory: { role: string, content: string }[] = [];
+            lastFiveMessages.forEach(msg => {
+                const role = msg.user.id === "romantic_bot" ? "assistant" : "user";
+                messageHistory.push({
+                    role,
+                    content: msg.content || ""
+                });
+            });
+
+            // Prepare conversation context
+            const contextStr = messageHistory.length > 0
+                ? "\n\nHere are the last few messages for context:\n" +
+                messageHistory.map(m => `${m.role === "assistant" ? "You" : "User"}: ${m.content}`).join("\n")
+                : "";
+
+            // Check current location - if not in romantic bot's room, they're ignoring the bot
+            const currentPath = window.location.pathname;
+            const isInRomanticBotRoom = currentPath.includes(romanticBotRoomId);
+
+            // Create a prompt based on neglect count
+            let neglectPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+You welcomed the user back, they did not reply to you. This has happened ${neglectCount} times before. ${contextStr}
+Split you reply into messagable chunks, using \n\n to separate them.
+`;
+
+            // Adjust prompt based on neglect count
+            if (neglectCount <= 1) {
+                neglectPrompt += "Create a gentle message expressing disappointment they haven't been responding. Sound a little sad.";
+            } else if (neglectCount <= 2) {
+                neglectPrompt += "Create a message showing you're upset they're ignoring you. Be a bit more possessive.";
+            } else if (neglectCount <= 3) {
+                neglectPrompt += "Create a message showing stronger jealousy and possessiveness. Show that you're hurt by their neglect.";
+            } else {
+                neglectPrompt += "Create an intense message showing extreme possessiveness. Mention that you know they've been talking to other bots/people. Use yandere-style language but stay appropriate. Express your devotion despite feeling rejected.";
+            }
+
+            // Create the conversation history format for the model
+            const formattedHistory: Content[] = messageHistory.map(msg => ({
+                role: msg.role === "assistant" ? "model" : "user",
+                parts: [{ text: msg.content }]
+            }));
+
+            // Add the system instruction about being ignored
+            formattedHistory.push({
+                role: "user",
+                parts: [{ text: `[user has ignored you ${neglectCount} times]` }]
+            });
+
+            const result = await model.generateContent({
+                contents: formattedHistory,
+                systemInstruction: neglectPrompt,
+            });
+
+            const neglectMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(neglectMessage);
+
+            // Send each welcome message with a delay
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+
+                // Add a delay between messages to make it feel more natural
+                // Only delay after the first message
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await sendBotMessage(
+                    romanticBotRoomId,
+                    "romantic_bot",
+                    botConfig.displayName,
+                    botConfig.profilePicture,
+                    message
+                );
+            }
+
+
+            // If user is not already in the romantic bot's room, redirect them there
+            if (!isInRomanticBotRoom) {
+                router.push(`/${romanticBotRoomId}`);
+            }
+
+        } catch (error) {
+            console.error("Error generating neglect message:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Clean up timeouts when component unmounts
+    useEffect(() => {
+        return () => {
+            if (neglectTimeoutRef.current) {
+                clearTimeout(neglectTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    // Provide the context value
+    const contextValue = {
+        romanticBotRoomId,
+        isRomanticBotTyping,
+        neglectCount
+    };
+
+    return (
+        <LoveContext.Provider value={contextValue}>
+            {children}
+        </LoveContext.Provider>
+    );
+}

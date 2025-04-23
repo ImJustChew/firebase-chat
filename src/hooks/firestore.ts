@@ -1,8 +1,9 @@
 import { auth, db } from "@/config/firebase";
-import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs } from 'firebase/firestore';
+import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { useState, useEffect } from "react";
+import { BotConfig } from "@/services/bot-service";
 
 export type User = {
     id: string
@@ -46,13 +47,19 @@ export const useUserDoc = () => {
     });
 }
 
-type Room = {
+export type Room = {
     id: string
     title: string
     members: string[]
     teaser?: Message
+    bot?: string  // Bot name reference, if this room has a bot
+    description?: string
+    createdAt?: Timestamp
+    updatedAt?: Timestamp
+    createdBy?: string
+    participants?: string[]
+    isPrivate?: boolean
 }
-
 
 const roomsConverter: FirestoreDataConverter<Room> = {
     toFirestore: (data: Room) => {
@@ -60,6 +67,13 @@ const roomsConverter: FirestoreDataConverter<Room> = {
             title: data.title,
             members: data.members,
             teaser: data.teaser,
+            bot: data.bot,
+            description: data.description,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+            createdBy: data.createdBy,
+            participants: data.participants,
+            isPrivate: data.isPrivate,
         }
     },
     fromFirestore: (snapshot: any, options: any): Room => {
@@ -69,6 +83,13 @@ const roomsConverter: FirestoreDataConverter<Room> = {
             title: data.title,
             members: data.members,
             teaser: data.teaser,
+            bot: data.bot,
+            description: data.description,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+            createdBy: data.createdBy,
+            participants: data.participants,
+            isPrivate: data.isPrivate,
         }
     },
 }
@@ -135,12 +156,12 @@ const messagesConverter: FirestoreDataConverter<Message> = {
     }
 }
 
-export const useRoomMessagesCol = (roomId: string) => {
-    return useCollectionData<Message>(
+export const useRoomMessagesCol = (roomId?: string) => {
+    return useCollectionData<Message>(roomId ?
         query(
             collection(db, "rooms", roomId, "messages").withConverter(messagesConverter),
             orderBy("timestamp", "asc")
-        ),
+        ) : undefined
     );
 }
 
@@ -420,3 +441,68 @@ export const useGetBlockedUsers = () => {
         }
     };
 };
+
+// Bot Firestore operations
+export async function createBotRoom(
+    userId: string,
+    botName: string,
+    botConfig: BotConfig,
+    skipInitialGreeting: boolean = false
+): Promise<string> {
+    const roomRef = await addDoc(collection(db, "rooms"), {
+        title: `Chat with ${botConfig.displayName}`,
+        description: `Your personal chat with ${botConfig.displayName}`,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdBy: userId,
+        participants: [userId],
+        members: [userId],
+        isPrivate: true,
+        bot: botName // Special property to mark this as a bot room
+    });
+
+    // Add initial greeting message from the bot unless we're skipping it
+    if (!skipInitialGreeting) {
+        await addDoc(collection(db, "rooms", roomRef.id, "messages"), {
+            content: botConfig.greeting,
+            timestamp: serverTimestamp(),
+            user: {
+                id: botName,
+                username: botConfig.displayName,
+                profilePicture: botConfig.profilePicture
+            }
+        });
+    }
+
+    return roomRef.id;
+}
+
+// Send a bot message to a room
+export async function sendBotMessage(roomId: string, botName: string, botDisplayName: string, botProfilePicture: string, content: string): Promise<string> {
+    const messageRef = await addDoc(collection(db, "rooms", roomId, "messages"), {
+        content: content,
+        timestamp: serverTimestamp(),
+        user: {
+            id: botName,
+            username: botDisplayName,
+            profilePicture: botProfilePicture
+        }
+    });
+
+    // Update the room teaser
+    await updateDoc(doc(db, "rooms", roomId), {
+        teaser: {
+            id: messageRef.id,
+            content: content,
+            user: {
+                id: botName,
+                username: botDisplayName,
+                profilePicture: botProfilePicture
+            },
+            timestamp: serverTimestamp()
+        },
+        updatedAt: serverTimestamp()
+    });
+
+    return messageRef.id;
+}

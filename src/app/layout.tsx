@@ -4,7 +4,7 @@ import { Inter } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner"
 import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarInput, SidebarFooter } from '@/components/ui/sidebar';
 import Fuse from 'fuse.js';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 
 import "./globals.css";
 import LoginDialog from "@/components/login-dialog";
@@ -22,6 +22,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import ProfileDialog from "@/components/profile-dialog";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
+import { LoveProvider } from "@/components/love-provider";
+import { useAuthState } from "react-firebase-hooks/auth";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -31,9 +33,12 @@ const inter = Inter({
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [unsortedRoom = [], loading, error] = useRoomsCol();
   const [user, loadingUser, errorUser] = useUserDoc();
+  const [userAuth] = useAuthState(auth);
   const { theme, setTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
-
+  const [unreadRooms, setUnreadRooms] = useState<Record<string, boolean>>({});
+  const initializedRoomsRef = useRef<Set<string>>(new Set());
+  const previousRoomsRef = useRef<Record<string, any>>({});
 
   const isMobile = useIsMobile();
   const pathname = usePathname();
@@ -51,6 +56,87 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
 
   const roomId = pathname.split("/")[1];
+
+  // Reset unread state when navigating to a room
+  useEffect(() => {
+    if (roomId) {
+      setUnreadRooms(prev => ({
+        ...prev,
+        [roomId]: false
+      }));
+    }
+  }, [roomId]);
+
+  // Initialize tracking for rooms
+  useEffect(() => {
+    if (!rooms.length || !user) return;
+
+    // Store initial state of all rooms for comparison
+    const roomsMap: Record<string, any> = {};
+    rooms.forEach(room => {
+      roomsMap[room.id] = {
+        teaser: room.teaser ? {
+          timestamp: room.teaser.timestamp?.toDate().getTime(),
+          content: room.teaser.content,
+          userId: room.teaser.user?.id
+        } : null
+      };
+
+      // Add room to initialized set
+      initializedRoomsRef.current.add(room.id);
+    });
+
+    // Only set this on first load when previousRoomsRef is empty
+    if (Object.keys(previousRoomsRef.current).length === 0) {
+      previousRoomsRef.current = roomsMap;
+    }
+  }, [rooms, user]);
+
+  // Track new messages
+  useEffect(() => {
+    if (!rooms.length || !user || !userAuth) return;
+
+    const newUnreadState = { ...unreadRooms };
+    let hasChanges = false;
+
+    rooms.forEach(room => {
+      // Skip if room isn't initialized (meaning we just loaded the app)
+      if (!initializedRoomsRef.current.has(room.id)) return;
+
+      const prevRoomData = previousRoomsRef.current[room.id];
+
+      // Check if this is a new message and not from the current user
+      if (room.teaser &&
+        prevRoomData &&
+        room.teaser.timestamp &&
+        (!prevRoomData.teaser ||
+          prevRoomData.teaser.timestamp !== room.teaser.timestamp?.toDate().getTime()) &&
+        room.teaser.user?.id !== userAuth.uid &&
+        room.id !== roomId) {
+
+        newUnreadState[room.id] = true;
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      setUnreadRooms(newUnreadState);
+    }
+
+    // Update the previous state for comparison in the next render
+    const updatedRoomsMap: Record<string, any> = {};
+    rooms.forEach(room => {
+      updatedRoomsMap[room.id] = {
+        teaser: room.teaser ? {
+          timestamp: room.teaser.timestamp?.toDate().getTime(),
+          content: room.teaser.content,
+          userId: room.teaser.user?.id
+        } : null
+      };
+    });
+    previousRoomsRef.current = updatedRoomsMap;
+  }, [rooms, user, roomId, unreadRooms]);
+
   // Create Fuse instance for fuzzy searching
   const fuse = useMemo(() => new Fuse(rooms, {
     keys: ['title', 'teaser.content', 'teaser.user.username'],
@@ -101,10 +187,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <Link
                   href={`/${room.id}`}
                   key={room.id}
-                  className="flex flex-col items-start gap-1 whitespace-nowrap border-b p-3 text-sm leading-tight last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  className="flex flex-col items-start gap-1 whitespace-nowrap border-b p-3 text-sm leading-tight last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground relative"
                 >
                   <div className="flex w-full items-center gap-2">
                     <span className="font-medium">{room.title}</span>{" "}
+                    {unreadRooms[room.id] && (
+                      <span className="absolute right-2 top-[calc(50%-6px)] flex size-3 rounded-full bg-blue-500"></span>
+                    )}
                     {room.teaser && <span className="ml-auto text-xs">{formatDistanceToNow(room.teaser.timestamp?.toDate() ?? new Date(), {})}</span>}
                   </div>
                   {room.teaser ? (
@@ -169,7 +258,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </div>
         </div>}
       </SidebarFooter>
-    </Sidebar>
+    </Sidebar >
   )
 }
 
@@ -204,9 +293,11 @@ export default function RootLayout({
           >
             <AppSidebar />
             <LoginDialog />
-            <SidebarInset className="max-h-screen">
-              {children}
-            </SidebarInset>
+            <LoveProvider>
+              <SidebarInset className="max-h-screen">
+                {children}
+              </SidebarInset>
+            </LoveProvider>
           </SidebarProvider>
           <Toaster />
         </ThemeProvider>

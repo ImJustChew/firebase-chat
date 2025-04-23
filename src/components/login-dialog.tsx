@@ -14,6 +14,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { initUserBotRoom } from '@/services/bot-service';
+import { useRouter } from 'next/navigation';
 
 // Schema for SignIn form
 const signInSchema = z.object({
@@ -294,6 +296,7 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
             address: "",
         },
     });
+    const router = useRouter();
 
     // Try to get display name from Google auth if available
     useEffect(() => {
@@ -321,9 +324,12 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                 },
                 { merge: true }
             );
-            toast("Profile completed successfully");
 
-            // Call the callback to close the dialog
+            // Create a romantic_bot chat room for the user (specifically passing "romantic_bot")
+            await initUserBotRoom(user.uid, (roomId) => {
+                router.push(`/${roomId}`);
+            }, "romantic_bot");
+            toast("Profile completed successfully! Your AI chat companion is ready.");
             onProfileComplete();
         } catch (error) {
             toast("Error completing profile");

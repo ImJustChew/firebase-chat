@@ -9,7 +9,7 @@ import { useState, useMemo } from 'react';
 import "./globals.css";
 import LoginDialog from "@/components/login-dialog";
 import { Button } from '@/components/ui/button';
-import { auth } from '@/config/firebase';
+import { auth, app } from '@/config/firebase';
 import { formatDistanceToNow } from 'date-fns';
 import { useRoomsCol, useUserDoc } from '@/hooks/firestore';
 import { LogOut, Moon, Plus, Settings, Sun } from 'lucide-react';
@@ -21,6 +21,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import ProfileDialog from "@/components/profile-dialog";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 
 const inter = Inter({
   variable: "--font-inter",
@@ -177,6 +178,16 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+
+  useEffect(() => {
+    const appCheck = initializeAppCheck(app, {
+      provider: new ReCaptchaEnterpriseProvider(
+        process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || ''
+      ),
+      isTokenAutoRefreshEnabled: true,
+    })
+  }, []);
+
   return (
     <html lang="en">
       <body

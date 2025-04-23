@@ -151,6 +151,8 @@ const usersConverter: FirestoreDataConverter<User> = {
             email: data.email,
             phoneNumber: data.phoneNumber,
             username: data.username,
+            profilePicture: data.profilePicture,
+            blockedUsers: data.blockedUsers || [],
         }
     },
     fromFirestore: (snapshot: any, options: any): User => {
@@ -161,6 +163,8 @@ const usersConverter: FirestoreDataConverter<User> = {
             email: data.email,
             phoneNumber: data.phoneNumber,
             username: data.username,
+            profilePicture: data.profilePicture,
+            blockedUsers: data.blockedUsers || [],
         }
     }
 }
@@ -189,37 +193,21 @@ export const useIsBlockedByUser = () => {
     };
 };
 
-// Modify useUsersCol to filter out users who have blocked the current user
 export const useUsersCol = () => {
     const [user] = useAuthState(auth);
-    const [allUsers = [], loading, error] = useCollectionData<User>(
-        query(collection(db, "users").withConverter(usersConverter))
+    const [users = [], loading, error] = useCollectionData<User>(
+        user ? query(
+            collection(db, "users").withConverter(usersConverter),
+        ) : undefined
     );
-    const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
-    const isBlockedByUser = useIsBlockedByUser();
+    // if user is blocked by another user, filter out that user from the list
+    const filteredUsers = user ?
+        users.filter((u) => {
+            if (u.blockedUsers?.includes(user.uid)) return false; // Don't show blocked users
+            return true;
+        }) : [];
 
-    // Filter out users who have blocked the current user
-    useEffect(() => {
-        const filterUsers = async () => {
-            if (!user || allUsers.length === 0) {
-                setFilteredUsers([]);
-                return;
-            }
-
-            const usersWhoHaventBlockedMe = await Promise.all(
-                allUsers.map(async (otherUser) => {
-                    const isBlocked = await isBlockedByUser(otherUser.id);
-                    return isBlocked ? null : otherUser;
-                })
-            );
-
-            setFilteredUsers(usersWhoHaventBlockedMe.filter(Boolean) as User[]);
-        };
-
-        filterUsers();
-    }, [user, allUsers]);
-
-    return [filteredUsers, loading, error] as [User[], boolean, Error | undefined];
+    return [filteredUsers, loading, error] as const;
 };
 
 export const createRoom = async (room: Omit<Room, "id">) => {

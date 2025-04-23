@@ -227,3 +227,15 @@ export const useRoomParticipants = (roomId: string) => {
         ) : undefined
     );
 }
+
+export const useUpdateUserProfile = () => {
+    const [user] = useAuthState(auth);
+    return async (data: Partial<User>) => {
+        if (!user) {
+            throw new Error("User not authenticated");
+        }
+        const userId = user.uid;
+        await setDoc(doc(db, "users", userId), data, { merge: true });
+        return userId;
+    }
+}

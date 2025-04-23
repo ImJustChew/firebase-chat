@@ -57,7 +57,6 @@ export type Room = {
     createdAt?: Timestamp
     updatedAt?: Timestamp
     createdBy?: string
-    participants?: string[]
     isPrivate?: boolean
 }
 
@@ -72,7 +71,6 @@ const roomsConverter: FirestoreDataConverter<Room> = {
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
             createdBy: data.createdBy,
-            participants: data.participants,
             isPrivate: data.isPrivate,
         }
     },
@@ -88,7 +86,6 @@ const roomsConverter: FirestoreDataConverter<Room> = {
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
             createdBy: data.createdBy,
-            participants: data.participants,
             isPrivate: data.isPrivate,
         }
     },
@@ -314,17 +311,6 @@ export const useDeleteMessage = (roomId: string) => {
     }
 }
 
-export const useRoomParticipants = (roomId: string) => {
-    const [roomDoc] = useRoomDoc(roomId);
-    const participants = roomDoc?.members || [];
-    return useCollectionData<User>(participants.length > 0 ?
-        query(
-            collection(db, "users").withConverter(usersConverter),
-            where(documentId(), "in", participants),
-        ) : undefined
-    );
-}
-
 export const useUpdateUserProfile = () => {
     const [user] = useAuthState(auth);
     return async (data: Partial<User>) => {
@@ -455,7 +441,6 @@ export async function createBotRoom(
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: userId,
-        participants: [userId],
         members: [userId],
         isPrivate: true,
         bot: botName // Special property to mark this as a bot room
@@ -505,4 +490,14 @@ export async function sendBotMessage(roomId: string, botName: string, botDisplay
     });
 
     return messageRef.id;
+}
+
+export const useRoomMembers = (roomId: string) => {
+    const [user] = useAuthState(auth);
+    return useCollectionData<User>(roomId ?
+        query(
+            collection(db, "rooms", roomId, "members").withConverter(usersConverter),
+            where(documentId(), "in", [user?.uid])
+        ) : undefined
+    );
 }

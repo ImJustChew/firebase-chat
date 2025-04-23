@@ -22,6 +22,7 @@ type LoveContextType = {
     romanticBotRoomId: string | undefined;
     isRomanticBotTyping: boolean;
     neglectCount: number;
+    trackMessageToOthers: (roomId: string) => void;
 };
 
 // Create the context with default values
@@ -29,6 +30,7 @@ const LoveContext = createContext<LoveContextType>({
     romanticBotRoomId: undefined,
     isRomanticBotTyping: false,
     neglectCount: 0,
+    trackMessageToOthers: () => { },
 });
 
 // Custom hook to use the love context
@@ -36,15 +38,13 @@ export function useLoveContext() {
     return useContext(LoveContext);
 }
 
-// Define message type for better type safety
-interface MessageData {
-    id: string;
-    content: string;
-    user: {
-        id: string;
-        username: string;
-    };
-    timestamp: Timestamp;
+// Define room teaser type
+interface RoomTeaser {
+    roomId: string;
+    lastMessage: string;
+    botType?: string;
+    participantName?: string;
+    isBot?: boolean;
 }
 
 export function LoveProvider({ children }: { children: React.ReactNode }) {
@@ -57,6 +57,7 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const [hasShownWelcomeBack, setHasShownWelcomeBack] = useState<boolean>(false);
     const [isFirstLoad, setIsFirstLoad] = useState<boolean>(true);
     const [botWaitingForResponse, setBotWaitingForResponse] = useState<boolean>(false);
+    const [otherChatMessageCount, setOtherChatMessageCount] = useState<number>(0);
     const neglectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const router = useRouter();
 
@@ -67,6 +68,127 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const lastFiveMessages = useMemo(() => {
         return messages.slice(-5);
     }, [messages]);
+
+    // Function to track when user sends a message to another chat participant
+    const trackMessageToOthers = (roomId: string) => {
+        // Only track if this is not the romantic bot's room
+        if (roomId !== romanticBotRoomId) {
+            setOtherChatMessageCount(prev => {
+                const newCount = prev + 1;
+                // Check if we've reached the threshold
+                if (newCount >= 10) {
+                    // Reset counter and trigger jealousy message
+                    setTimeout(() => {
+                        sendJealousyMessage();
+                        setOtherChatMessageCount(0);
+                    }, 500);
+                }
+                return newCount;
+            });
+        }
+    };
+
+    // Function to get teasers from all rooms
+    const getAllRoomTeasers = async (): Promise<RoomTeaser[]> => {
+        if (!user) return [];
+
+        try {
+            const roomsRef = collection(db, "rooms");
+            const q = query(
+                roomsRef,
+                where("members", "array-contains", user.uid)
+            );
+
+            const querySnapshot = await getDocs(q);
+            const teasers: RoomTeaser[] = [];
+
+            for (const doc of querySnapshot.docs) {
+                const room = doc.data();
+                if (room.teaser && doc.id !== romanticBotRoomId) {
+                    // Determine if this is a bot or human conversation
+                    const isBot = !!room.bot;
+                    const participantName = isBot ?
+                        (room.title || room.bot) :
+                        (room.teaser.user?.username || "someone");
+
+                    teasers.push({
+                        roomId: doc.id,
+                        lastMessage: room.teaser.content,
+                        botType: room.bot,
+                        participantName,
+                        isBot
+                    });
+                }
+            }
+
+            return teasers;
+        } catch (error) {
+            console.error("Error fetching room teasers:", error);
+            return [];
+        }
+    };
+
+    // Function to generate and send jealousy message based on other conversations
+    const sendJealousyMessage = async () => {
+        if (!romanticBotRoomId) return;
+
+        try {
+            setIsRomanticBotTyping(true);
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            // Get teasers from all rooms
+            const teasers = await getAllRoomTeasers();
+
+            if (teasers.length === 0) {
+                console.log("No other conversations found to be jealous about");
+                return;
+            }
+
+            const teaserContext = teasers
+                .map(teaser => `In chat with ${teaser.participantName || "someone else"} ${teaser.isBot ? "(bot)" : "(human)"}: "${teaser.lastMessage}"`)
+                .join("\n");
+
+            // Create a prompt for the jealousy message
+            const jealousyPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user has been talking to other people and bots a lot. Here are snippets of their conversations:
+
+${teaserContext}
+
+Create a message showing your jealousy about them talking to others (both humans and bots). Be possessive but still caring.
+Make it clear you've been "watching" them talk to others. Be dramatic in a yandere way but stay appropriate.
+Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            // Generate the response
+            const result = await model.generateContent(jealousyPrompt);
+
+            const jealousyMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(jealousyMessage);
+
+            // Send each message with a delay
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+
+                // Add a delay between messages to make it feel more natural
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await sendBotMessage(
+                    romanticBotRoomId,
+                    "romantic_bot",
+                    botConfig.displayName,
+                    botConfig.profilePicture,
+                    message
+                );
+            }
+        } catch (error) {
+            console.error("Error generating jealousy message:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
 
     // Find the romantic bot room for the current user
     useEffect(() => {
@@ -367,7 +489,8 @@ Split you reply into messagable chunks, using \n\n to separate them.
     const contextValue = {
         romanticBotRoomId,
         isRomanticBotTyping,
-        neglectCount
+        neglectCount,
+        trackMessageToOthers
     };
 
     return (

@@ -34,6 +34,7 @@ import ParticipantsList from "@/components/participants-list";
 import MessageSearch from "@/components/message-search";
 import { generateBotResponse, getBotConfig, generateAndSendBotResponses } from '@/services/bot-service';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { useLoveContext } from '@/components/love-provider';
 
 const AttachmentViewerDialog = ({ attachment, children }: { attachment: Attachment, children: React.ReactNode }) => {
     return (
@@ -94,6 +95,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     const [isBotTyping, setIsBotTyping] = useState<boolean>(false);
 
     const router = useRouter();
+    const { trackMessageToOthers } = useLoveContext();
 
     const sendMessage = useSendMessage(roomId);
     const deleteMessage = useDeleteMessage(roomId);
@@ -244,6 +246,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
             await sendMessage({
                 content: newMessage,
             })
+            trackMessageToOthers(roomId);
             setNewMessage("")
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
         } catch (error) {

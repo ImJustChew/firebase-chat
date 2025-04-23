@@ -16,7 +16,7 @@ import {
 import { toast } from "sonner"
 import { useAuthState } from "react-firebase-hooks/auth"
 import { auth } from "@/config/firebase"
-import { useRoomParticipants, useBlockUser, useIsUserBlocked } from '@/hooks/firestore';
+import { useBlockUser, useIsUserBlocked, useRoomMembers } from '@/hooks/firestore';
 
 type User = {
     id: string
@@ -38,7 +38,7 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
     const blockUser = useBlockUser();
     const isUserBlocked = useIsUserBlocked();
 
-    const [participants = [], loading, error] = useRoomParticipants(roomId)
+    const [participants = [], loading, error] = useRoomMembers(roomId)
 
     const filteredParticipants = participants.filter((user) =>
         user.username.toLowerCase().includes(searchQuery.toLowerCase()),

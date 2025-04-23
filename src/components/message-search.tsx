@@ -17,6 +17,7 @@ export default function MessageSearch({ messages }: MessageSearchProps) {
     const [currentSearchIndex, setCurrentSearchIndex] = useState<number>(0);
     const [showControls, setShowControls] = useState<boolean>(false);
     const [fuseInstance, setFuseInstance] = useState<Fuse<any> | null>(null);
+    const [isExpanded, setIsExpanded] = useState<boolean>(false);
 
     // Initialize or update Fuse instance when messages change
     useEffect(() => {
@@ -49,6 +50,8 @@ export default function MessageSearch({ messages }: MessageSearchProps) {
 
         if (results.length > 0) {
             scrollToMessage(results[0].refIndex);
+            // Collapse search input on mobile when results are found
+            setIsExpanded(false);
         } else {
             toast.info("No messages found");
         }
@@ -85,9 +88,35 @@ export default function MessageSearch({ messages }: MessageSearchProps) {
         scrollToMessage(searchResults[newIndex].refIndex);
     };
 
+    const toggleSearch = () => {
+        setIsExpanded(!isExpanded);
+        if (!isExpanded && searchQuery) {
+            // Re-run search when expanding if there was a previous query
+            setTimeout(handleSearch, 100);
+        }
+    };
+
     return (
         <div className="flex items-center gap-2">
-            <div className="relative">
+            {/* Search icon for mobile (always visible) */}
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 md:hidden"
+                            onClick={toggleSearch}
+                        >
+                            <Search className="h-3.5 w-3.5" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Search messages</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+
+            {/* Search input (always visible on desktop, toggleable on mobile) */}
+            <div className={`relative ${isExpanded ? 'flex' : 'hidden'} md:flex`}>
                 <Input
                     placeholder="Search messages"
                     className="h-7 w-36 bg-secondary/50 border-none text-sm pl-7"
@@ -111,8 +140,9 @@ export default function MessageSearch({ messages }: MessageSearchProps) {
                 )}
             </div>
 
+            {/* Search controls (only visible when there are results) */}
             {showControls && (
-                <div className="flex items-center gap-1 bg-secondary/50 rounded px-2 py-1">
+                <div className={`flex items-center gap-1 bg-secondary/50 rounded px-2 py-1 ${isExpanded ? 'flex' : 'hidden'} md:flex`}>
                     <span className="text-xs text-muted-foreground">
                         {currentSearchIndex + 1}/{searchResults.length}
                     </span>

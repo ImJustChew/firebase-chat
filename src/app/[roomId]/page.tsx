@@ -310,7 +310,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                     {room?.title}
                 </h2>
                 {room?.bot && (
-                    <div className="ml-2 px-1.5 py-0.5 text-xs bg-primary/10 text-primary rounded">
+                    <div className="ml-2 px-1.5 py-0.5 text-xs bg-primary/10 text-primary rounded hidden md:block">
                         <div className="flex items-center gap-1">
                             <Bot className="h-3 w-3" />
                             <span>AI Bot</span>

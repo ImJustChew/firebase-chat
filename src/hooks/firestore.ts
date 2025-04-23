@@ -152,9 +152,8 @@ export const createRoom = async (room: Omit<Room, "id">) => {
 
 export const useSendMessage = (roomId: string) => {
     const [user] = useAuthState(auth);
-    const userDoc = useUserDoc();
-    const userData = userDoc[0] as User;
-    const username = userData.username;
+    const [userData] = useUserDoc();
+    const username = userData?.username;
     const profilePicture = userData?.profilePicture || "/placeholder.svg?height=200&width=200";
 
     return async (message: Omit<Message, "id" | "user" | "timestamp">) => {

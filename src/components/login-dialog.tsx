@@ -23,17 +23,9 @@ const signInSchema = z.object({
 
 // Schema for SignUp form
 const signUpSchema = z.object({
-    username: z
-        .string()
-        .min(3, "Username must be at least 3 characters")
-        .max(20, "Username cannot exceed 20 characters")
-        .regex(/^[a-z0-9_-]+$/, "Username can only contain lowercase letters, numbers, underscores, and hyphens")
-        .transform(val => val.toLowerCase()),
     email: z.string().email("Invalid email address"),
     password: z.string().min(6, "Password must be at least 6 characters"),
     confirmPassword: z.string().min(6, "Password must be at least 6 characters"),
-    phoneNumber: z.string().optional(),
-    address: z.string().optional(),
 }).refine(data => data.password === data.confirmPassword, {
     message: "Passwords don't match",
     path: ["confirmPassword"],
@@ -173,12 +165,9 @@ function SignUpForm() {
     const form = useForm<z.infer<typeof signUpSchema>>({
         resolver: zodResolver(signUpSchema),
         defaultValues: {
-            username: "",
             email: "",
             password: "",
             confirmPassword: "",
-            phoneNumber: "",
-            address: "",
         },
     });
 
@@ -189,16 +178,8 @@ function SignUpForm() {
                 throw new Error("User creation failed");
             }
 
-            await setDoc(
-                doc(db, "users", userCredential.user.uid),
-                {
-                    username: values.username,
-                    email: values.email,
-                    phoneNumber: values.phoneNumber || "",
-                    address: values.address || "",
-                    profileCompleted: true,
-                }
-            );
+            // No longer storing profile data at signup
+            // The profile completion dialog will be shown automatically
             toast("Account created successfully");
         } catch (error) {
             toast("Error creating account");
@@ -217,27 +198,6 @@ function SignUpForm() {
     return (
         <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                    control={form.control}
-                    name="username"
-                    render={({ field }) => (
-                        <FormItem className="space-y-2">
-                            <FormLabel className="text-sm font-medium">USERNAME</FormLabel>
-                            <FormControl>
-                                <Input
-                                    placeholder="johndoe"
-                                    {...field}
-                                    className="bg-accent border-none"
-                                />
-                            </FormControl>
-                            <FormDescription className="text-xs">
-                                Lowercase letters, numbers, underscores, and hyphens only
-                            </FormDescription>
-                            <FormMessage />
-                        </FormItem>
-                    )}
-                />
-
                 <FormField
                     control={form.control}
                     name="email"
@@ -284,25 +244,6 @@ function SignUpForm() {
                             <FormControl>
                                 <Input
                                     type="password"
-                                    {...field}
-                                    className="bg-accent border-none"
-                                />
-                            </FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )}
-                />
-
-                <FormField
-                    control={form.control}
-                    name="phoneNumber"
-                    render={({ field }) => (
-                        <FormItem className="space-y-2">
-                            <FormLabel className="text-sm font-medium">PHONE NUMBER (OPTIONAL)</FormLabel>
-                            <FormControl>
-                                <Input
-                                    type="tel"
-                                    placeholder="+1 (555) 123-4567"
                                     {...field}
                                     className="bg-accent border-none"
                                 />
@@ -534,8 +475,8 @@ const LoginDialog = () => {
     if (loading || checkingProfile) return null;
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogContent className={dialogState === 'profile-completion' ? "sm:max-w-md" : ""}>
+        <Dialog open={open} onOpenChange={setOpen} >
+            <DialogContent className={dialogState === 'profile-completion' ? "sm:max-w-md" : ""} hideCloseButton={true}>
                 <DialogTitle className={dialogState === 'login' ? "hidden" : "sr-only"}>
                     Complete Your Profile
                 </DialogTitle>

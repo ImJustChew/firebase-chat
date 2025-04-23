@@ -1,5 +1,5 @@
 import { auth, db } from "@/config/firebase";
-import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { useState, useEffect } from "react";
@@ -502,4 +502,10 @@ export const useRoomMembers = (roomId: string) => {
             where(documentId(), "in", roomDoc.members),
         ) : undefined
     );
+}
+
+export const deleteRoom = async (roomId: string) => {
+    const roomRef = doc(db, "rooms", roomId);
+    await deleteDoc(roomRef);
+    return roomRef.id;
 }

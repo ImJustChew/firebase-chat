@@ -2,28 +2,21 @@
 import { Button } from "@/components/ui/button";
 import { DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { auth, db } from "@/config/firebase";
+import { auth } from "@/config/firebase";
 import { Dialog } from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Attachment, useDeleteMessage, useRoomDoc, useRoomMessagesCol, useSendMessage, useIsUserBlocked, sendBotMessage } from '@/hooks/firestore';
 import {
-    AtSign,
-    Bot,
-    File,
-    Gift,
-    Hash,
-    ImageIcon,
-    Plus,
-    Send,
-    Smile,
-    Trash2,
-    Users,
-    Video,
-    Bell,
-} from "lucide-react";
+    Attachment,
+    useDeleteMessage,
+    useRoomDoc,
+    useRoomMessagesCol,
+    useSendMessage,
+    useIsUserBlocked,
+} from '@/hooks/firestore';
+import { Bot, File, Gift, Hash, Send, Trash2, Users, Bell } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -32,8 +25,7 @@ import { useParams, useRouter } from "next/navigation";
 import GifPicker from "@/components/gif-picker";
 import ParticipantsList from "@/components/participants-list";
 import MessageSearch from "@/components/message-search";
-import { generateBotResponse, getBotConfig, generateAndSendBotResponses } from '@/services/bot-service';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { generateAndSendBotResponses } from '@/services/bot-service';
 import { useLoveContext } from '@/components/love-provider';
 
 const AttachmentViewerDialog = ({ attachment, children }: { attachment: Attachment, children: React.ReactNode }) => {

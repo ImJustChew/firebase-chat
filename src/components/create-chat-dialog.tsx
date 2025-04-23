@@ -14,11 +14,13 @@ import { Separator } from "@/components/ui/separator"
 import { DialogTrigger } from "@radix-ui/react-dialog"
 import { useUsersCol, createRoom, useIsUserBlocked } from '@/hooks/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
-import { auth } from "@/config/firebase"
+import { auth, db } from "@/config/firebase"
 import { Ban, Bot } from "lucide-react"
 import { toast } from "sonner"
 import { initUserBotRoom } from "@/services/bot-service"
 import { useRouter } from 'next/navigation'
+import { useLoveContext } from './love-provider'
+import { doc, getDoc } from "firebase/firestore"
 
 export default function CreateChatDialog({
     children,
@@ -33,6 +35,7 @@ export default function CreateChatDialog({
     const [user] = useAuthState(auth);
     const isUserBlocked = useIsUserBlocked();
     const router = useRouter();
+    const { handleNewRoomCreated, handleNewBotChatAdded } = useLoveContext();
 
     // Filter out the current user but keep blocked users visible
     const friends = users.filter(friend => friend.id !== user?.uid);
@@ -49,6 +52,8 @@ export default function CreateChatDialog({
                 members: [...selectedFriends, user.uid],
             });
 
+            // Notify the romantic bot about the new room
+            handleNewRoomCreated(chatName);
             // Reset form and close dialog
             setChatName("");
             setSelectedFriends([]);
@@ -82,7 +87,26 @@ export default function CreateChatDialog({
             // Also pass null as specificBotName to use getRandomBotName with default exclusions
             await initUserBotRoom(
                 user.uid,
-                (roomId) => {
+                async (roomId) => {
+                    // Get the bot type from the created room
+                    try {
+                        const roomDoc = await getDoc(doc(db, "rooms", roomId));
+                        if (roomDoc.exists()) {
+                            const roomData = roomDoc.data();
+                            const botType = roomData.bot;
+
+                            // Only trigger the romantic bot's reaction if it's not a romantic_bot room
+                            if (botType && botType !== "romantic_bot") {
+                                // Delay the notification to after navigation
+                                setTimeout(() => {
+                                    handleNewBotChatAdded(roomId, botType);
+                                }, 2000); // Wait 2 seconds after navigation before notifying romantic bot
+                            }
+                        }
+                    } catch (error) {
+                        console.error("Error getting new bot room details:", error);
+                    }
+
                     setCreatingBotChat(false); // Reset state before navigation
                     setOpen(false); // Close the dialog first
                     router.push(`/${roomId}`); // Then navigate

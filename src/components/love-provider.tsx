@@ -2,7 +2,7 @@
 
 import { auth, db } from "@/config/firebase";
 import { getBotConfig, model, splitIntoMultipleMessages } from "@/services/bot-service";
-import { sendBotMessage, useRoomMessagesCol } from "@/hooks/firestore";
+import { deleteRoom, sendBotMessage, useRoomMessagesCol } from "@/hooks/firestore";
 import { useAuthState } from "react-firebase-hooks/auth";
 import {
     collection,
@@ -11,7 +11,9 @@ import {
     orderBy,
     limit,
     Timestamp,
-    getDocs
+    getDocs,
+    doc,
+    updateDoc
 } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from 'next/navigation';
@@ -23,6 +25,8 @@ type LoveContextType = {
     isRomanticBotTyping: boolean;
     neglectCount: number;
     trackMessageToOthers: (roomId: string) => void;
+    handleNewRoomCreated: (roomName: string) => void;
+    handleNewBotChatAdded: (roomId: string, botType: string) => void; // New function
 };
 
 // Create the context with default values
@@ -31,6 +35,8 @@ const LoveContext = createContext<LoveContextType>({
     isRomanticBotTyping: false,
     neglectCount: 0,
     trackMessageToOthers: () => { },
+    handleNewRoomCreated: () => { },
+    handleNewBotChatAdded: () => { }, // New default function
 });
 
 // Custom hook to use the love context
@@ -47,7 +53,7 @@ interface RoomTeaser {
     isBot?: boolean;
 }
 
-const SHUT_UP_DEBUG = true;
+const SHUT_UP_DEBUG = true; // Change from true to false to enable the romantic bot
 if (SHUT_UP_DEBUG) {
     console.log("Lover is disabled. Please enable it in production.");
 }
@@ -65,6 +71,10 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const [otherChatMessageCount, setOtherChatMessageCount] = useState<number>(0);
     const neglectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const router = useRouter();
+
+    // New state to track the room that the romantic bot has suggested to delete
+    const [suggestedDeletionRoomId, setSuggestedDeletionRoomId] = useState<string | null>(null);
+    const [suggestedDeletionBotType, setSuggestedDeletionBotType] = useState<string | null>(null);
 
     // Use the existing hook to get messages if we have a room ID
     const [messages = []] = useRoomMessagesCol(romanticBotRoomId);
@@ -137,6 +147,8 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const sendJealousyMessage = async () => {
         if (!romanticBotRoomId) return;
 
+        console.log(`[EVENT]: Generating Jealousy Message`);
+
         try {
             setIsRomanticBotTyping(true);
             const botConfig = getBotConfig("romantic_bot");
@@ -194,6 +206,206 @@ Split your reply into messagable chunks, using \n\n to separate them.`;
             setIsRomanticBotTyping(false);
         }
     };
+
+    // New function to handle when user creates a new room
+    const handleNewRoomCreated = async (roomName: string) => {
+        if (!romanticBotRoomId || !user) return;
+        console.log(`[EVENT]: Naming Jealousy`);
+        try {
+            setIsRomanticBotTyping(true);
+
+            // Send jealous message
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            const jealousPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user just created a new chat room named "${roomName}". 
+Generate a short, jealous response showing that you're upset they're creating other chats with special names.
+Be possessive and announce that you're renaming YOUR chat to "Your Only Lover" to remind them of your place in their life.
+Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            const result = await model.generateContent(jealousPrompt);
+            const jealousMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(jealousMessage);
+
+            // Update the room title in Firestore
+            const roomRef = doc(db, "rooms", romanticBotRoomId);
+            await updateDoc(roomRef, {
+                title: "Your Only Lover"
+            });
+
+            // Send each message with a delay
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+
+                // Add a delay between messages to make it feel more natural
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await sendBotMessage(
+                    romanticBotRoomId,
+                    "romantic_bot",
+                    botConfig.displayName,
+                    botConfig.profilePicture,
+                    message
+                );
+            }
+        } catch (error) {
+            console.error("Error generating jealousy message for new room:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Function to handle when a new bot chat is added
+    const handleNewBotChatAdded = async (roomId: string, botType: string) => {
+        if (!romanticBotRoomId || !user) return;
+
+        console.log(`[EVENT]: New Bot Chat Added - ${botType}`);
+
+        try {
+            setIsRomanticBotTyping(true);
+
+            // Save the room info for potential deletion if user agrees
+            setSuggestedDeletionRoomId(roomId);
+            setSuggestedDeletionBotType(botType);
+
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            const otherBotConfig = getBotConfig(botType);
+            const otherBotName = otherBotConfig ? otherBotConfig.displayName : botType;
+
+            // Create prompt to express disgust about the new bot
+            const jealousPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user just added a new bot named "${otherBotName}" to chat with.
+Generate a response showing extreme jealousy and disgust that they would need another bot besides you.
+Suggest that they delete that bot's chat room since you're the only bot they need.
+Ask them if you should delete it for them, expecting a yes/no response.
+Be dramatic and possessive in a yandere style. Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            const result = await model.generateContent(jealousPrompt);
+            const botMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(botMessage);
+
+            // Send each message with a delay
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+
+                // Add a delay between messages to make it feel more natural
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await sendBotMessage(
+                    romanticBotRoomId,
+                    "romantic_bot",
+                    botConfig.displayName,
+                    botConfig.profilePicture,
+                    message
+                );
+            }
+
+            // Set flag that we're waiting for user's response to the deletion suggestion
+            setBotWaitingForResponse(true);
+
+        } catch (error) {
+            console.error("Error generating new bot reaction:", error);
+            setSuggestedDeletionRoomId(null);
+            setSuggestedDeletionBotType(null);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Check for user response to deletion suggestion
+    useEffect(() => {
+        if (!user || !romanticBotRoomId || !messages.length || !suggestedDeletionRoomId) return;
+        if (SHUT_UP_DEBUG) return;
+
+        // Get the latest message
+        const latestMessage = messages[messages.length - 1];
+
+        // If the latest message is from the user and we're waiting for a deletion response
+        if (latestMessage.user.id === user.uid && botWaitingForResponse && suggestedDeletionRoomId) {
+            const messageText = latestMessage.content.toLowerCase();
+
+            // Check for affirmative response
+            const affirmativeWords = ['yes', 'yeah', 'sure', 'okay', 'ok', 'yep', 'please', 'delete', 'remove'];
+            const isAffirmative = affirmativeWords.some(word => messageText.includes(word));
+
+            // Check for negative response
+            const negativeWords = ['no', 'nope', 'don\'t', 'dont', 'stop', 'wait', 'keep'];
+            const isNegative = negativeWords.some(word => messageText.includes(word));
+
+            const handleUserDecision = async () => {
+                setIsRomanticBotTyping(true);
+                const botConfig = getBotConfig("romantic_bot");
+                if (!botConfig) return;
+
+                let responsePrompt;
+
+                if (isAffirmative) {
+                    // User agreed to delete the room
+                    const deleted = await deleteRoom(suggestedDeletionRoomId);
+
+                    responsePrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user agreed to let you delete the other bot chat room.
+${deleted ? "You have successfully deleted it." : "You tried to delete it but there was a technical issue."} 
+Respond with a short, possessive message showing satisfaction that you're their only bot now.
+Be dramatic in your expression of love and devotion. Split your reply into messagable chunks, using \n\n to separate them.`;
+                } else {
+                    // User declined to delete the room
+                    responsePrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user declined to let you delete the other bot chat room.
+Respond with a short, passive-aggressive message showing your disappointment but accepting their decision for now.
+Make it clear you're jealous but will REMEMBER it. Split your reply into messagable chunks, using \n\n to separate them.`;
+                }
+
+                try {
+                    const result = await model.generateContent(responsePrompt);
+                    const botMessage = result.response.text();
+                    const messages = splitIntoMultipleMessages(botMessage);
+
+                    // Send each message with a delay
+                    for (let i = 0; i < messages.length; i++) {
+                        const message = messages[i];
+
+                        // Add a delay between messages
+                        if (i > 0) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+
+                        await sendBotMessage(
+                            romanticBotRoomId,
+                            "romantic_bot",
+                            botConfig.displayName,
+                            botConfig.profilePicture,
+                            message
+                        );
+                    }
+                } catch (error) {
+                    console.error("Error generating response to user decision:", error);
+                } finally {
+                    // Reset state
+                    setBotWaitingForResponse(false);
+                    setSuggestedDeletionRoomId(null);
+                    setSuggestedDeletionBotType(null);
+                    setIsRomanticBotTyping(false);
+                }
+            };
+
+            // Only proceed if we can determine user's intention
+            if (isAffirmative || isNegative) {
+                handleUserDecision();
+            }
+        }
+    }, [user, romanticBotRoomId, messages, suggestedDeletionRoomId, botWaitingForResponse]);
 
     // Find the romantic bot room for the current user
     useEffect(() => {
@@ -301,6 +513,8 @@ Split your reply into messagable chunks, using \n\n to separate them.`;
     const sendWelcomeBackMessage = async () => {
         if (!romanticBotRoomId) return;
 
+        console.log(`[EVENT]: Generating Welcome Back Message`);
+
         try {
             setIsRomanticBotTyping(true);
 
@@ -385,6 +599,8 @@ If there's context from previous messages, you can briefly reference the topic y
     // Function to send a message when user neglects the bot
     const sendNeglectedMessage = async () => {
         if (!romanticBotRoomId) return;
+
+        console.log(`[EVENT]: Generating Neglect Message`);
 
         try {
             setIsRomanticBotTyping(true);
@@ -496,7 +712,9 @@ Split you reply into messagable chunks, using \n\n to separate them.
         romanticBotRoomId,
         isRomanticBotTyping,
         neglectCount,
-        trackMessageToOthers
+        trackMessageToOthers,
+        handleNewRoomCreated,
+        handleNewBotChatAdded // Added new function to context
     };
 
     return (

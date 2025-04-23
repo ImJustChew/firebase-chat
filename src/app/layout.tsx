@@ -284,21 +284,21 @@ export default function RootLayout({
         className={`${inter.variable} antialiased`}
       >
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-          <SidebarProvider
-            style={
-              {
-                "--sidebar-width": "280px",
-              } as React.CSSProperties
-            }
-          >
-            <AppSidebar />
-            <LoginDialog />
-            <LoveProvider>
+          <LoveProvider>
+            <SidebarProvider
+              style={
+                {
+                  "--sidebar-width": "280px",
+                } as React.CSSProperties
+              }
+            >
+              <AppSidebar />
+              <LoginDialog />
               <SidebarInset className="max-h-screen">
                 {children}
               </SidebarInset>
-            </LoveProvider>
-          </SidebarProvider>
+            </SidebarProvider>
+          </LoveProvider>
           <Toaster />
         </ThemeProvider>
       </body>

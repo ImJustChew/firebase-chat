@@ -8,7 +8,14 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Attachment, useDeleteMessage, useRoomDoc, useRoomMessagesCol, useSendMessage } from '@/hooks/firestore';
+import {
+    Attachment,
+    useDeleteMessage,
+    useRoomDoc,
+    useRoomMessagesCol,
+    useSendMessage,
+    useIsUserBlocked
+} from '@/hooks/firestore';
 import {
     AtSign,
     Bot,
@@ -75,6 +82,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     const [messages = [], loading, error] = useRoomMessagesCol(roomId);
     const [user, loadingUser, errorUser] = useAuthState(auth);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const isUserBlocked = useIsUserBlocked();
 
     // Add state for notification permission
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(null);
@@ -279,7 +287,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                 </h2>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" suppressHydrationWarning={true} >
                 <MessageSearch messages={messages} />
 
                 {notificationPermission !== "granted" && typeof window !== 'undefined' && "Notification" in window && <TooltipProvider>
@@ -288,7 +296,6 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                             <Button
                                 variant="destructive"
                                 size="icon"
-                                suppressHydrationWarning={true}
                                 className="h-8 w-8"
                                 onClick={requestNotificationPermission}
                             >
@@ -353,11 +360,28 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                     ) : (
                         messages.map((message, index) => {
                             const prevMessage = index > 0 ? messages[index - 1] : null
+                            const isOwnMessage = message.user.id === user?.uid;
+                            const isBlockedUser = isUserBlocked(message.user.id);
                             const showHeader =
                                 !prevMessage ||
                                 prevMessage.user.id !== message.user.id ||
                                 (message.timestamp?.toMillis() ?? Date.now()) - prevMessage.timestamp!.toMillis() >
                                 5 * 60 * 1000
+
+                            // Display a placeholder for blocked user messages
+                            if (isBlockedUser && !isOwnMessage) {
+                                return (
+                                    <div
+                                        id={`message-${message.id}`}
+                                        key={message.id}
+                                        className="flex items-center opacity-50"
+                                    >
+                                        <div className="bg-muted rounded-md p-3 text-sm">
+                                            <p className="italic text-muted-foreground">Message from blocked user</p>
+                                        </div>
+                                    </div>
+                                );
+                            }
 
                             return (
                                 <div

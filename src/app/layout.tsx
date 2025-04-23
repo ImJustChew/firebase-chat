@@ -130,7 +130,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         {user && <div className="flex w-full items-center justify-between border-t p-4">
           <div className="flex items-center gap-2">
             <img
-              src={user?.photoURL || "/placeholder.svg?height=200&width=200"}
+              src={user.profilePicture || "/placeholder.svg?height=200&width=200"}
               alt="User Avatar"
               className="h-8 w-8 rounded-full"
             />

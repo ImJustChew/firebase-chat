@@ -2,25 +2,60 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper functions
+    function isUserBlocked(blockingUserId, blockedUserId) {
+      let blockingUserDoc = get(/databases/$(database)/documents/users/$(blockingUserId));
+      return blockingUserDoc != null && 
+             blockingUserDoc.data.blockedUsers != null && 
+             blockedUserId in blockingUserDoc.data.blockedUsers;
+    }
+    
+    function noMutualBlocking(userIds) {
+      let currentUserId = request.auth.uid;
+
+      // Ensure no user in the list is mutually blocking the current user
+      return !userIds.any(userId,
+        isUserBlocked(userId, currentUserId) ||
+        isUserBlocked(currentUserId, userId)
+      );
+    }
+    
     match /users/{userId} {
-    	allow read: if true;
+      // Anyone can read user data
+      allow read: if true;
+      
+      // Users can only write to their own document
       allow write: if request.auth.uid == userId;
     }
+    
     match /rooms/{roomId} {
-    	// Fix read rule - use resource not request.resource
-    	allow read: if request.auth.uid in resource.data.members;
-      // Better write rule for updates vs creation
-      allow create: if request.auth.uid in request.resource.data.members;
-      allow update: if request.auth.uid in resource.data.members || 
-                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teaser']) && 
-                      request.auth.uid in resource.data.members);
+      // Users can read room data if they are members, regardless of blocking status
+      allow read: if request.auth.uid in resource.data.members;
+      
+      // For creating a room, prevent adding users with mutual blocks
+      allow create: if request.auth.uid in request.resource.data.members &&
+                     noMutualBlocking(request.resource.data.members);
+      
+      // For updating a room
+      allow update: if 
+        // Basic member permission (can always update if you're a member)
+        (request.auth.uid in resource.data.members) ||
+        // When adding new members, check for blocking relationships
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) && 
+         request.auth.uid in resource.data.members &&
+         noMutualBlocking(request.resource.data.members.removeAll(resource.data.members)));
       
       match /messages/{messageId} {
-      	allow read: if request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.members;
+        // Can read messages in rooms where you're a member
+        allow read: if request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.members;
+        
+        // Can create messages if you're the author
         allow create: if request.auth.uid == request.resource.data.user.id;
+        
+        // Can delete your own messages
         allow update: if (resource.data.isDeleted == false && 
-                         request.resource.data.isDeleted == true && 
-                         request.auth.uid == resource.data.user.id) || 
+                        request.resource.data.isDeleted == true && 
+                        request.auth.uid == resource.data.user.id) || 
                         request.auth.uid == resource.data.user.id;
       }
     }

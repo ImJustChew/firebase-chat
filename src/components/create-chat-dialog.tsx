@@ -12,9 +12,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { DialogTrigger } from "@radix-ui/react-dialog"
-import { useUsersCol, createRoom } from '@/hooks/firestore';
+import { useUsersCol, createRoom, useIsUserBlocked } from '@/hooks/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { auth } from "@/config/firebase"
+import { Ban } from "lucide-react"
 
 type Friend = {
     id: string
@@ -33,8 +34,10 @@ export default function CreateChatDialog({
     const [open, setOpen] = useState(false)
     const [users = [], loading, error] = useUsersCol();
     const [user] = useAuthState(auth);
+    const isUserBlocked = useIsUserBlocked();
 
-    const friends = users.filter((friend: Friend) => friend.id !== user?.uid)
+    // Filter out the current user but keep blocked users visible
+    const friends = users.filter(friend => friend.id !== user?.uid);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -53,8 +56,15 @@ export default function CreateChatDialog({
         setOpen(false)
     }
 
-    const toggleFriend = (friendId: string) => {
-        setSelectedFriends((prev) => (prev.includes(friendId) ? prev.filter((id) => id !== friendId) : [...prev, friendId]))
+    const toggleFriend = (friendId: string, isBlocked: boolean) => {
+        // Don't allow selecting blocked users
+        if (isBlocked) return;
+
+        setSelectedFriends((prev) => (
+            prev.includes(friendId)
+                ? prev.filter((id) => id !== friendId)
+                : [...prev, friendId]
+        ));
     }
 
     return (
@@ -84,28 +94,49 @@ export default function CreateChatDialog({
                         <Label className="block mb-2">Select Friends</Label>
                         <ScrollArea className="h-60 border rounded-md p-2">
                             {friends.length === 0 ? (
-                                <p className="text-center text-muted-foreground py-4">No friends yet. Add friends to create a chat.</p>
+                                <p className="text-center text-muted-foreground py-4">No friends available. Add friends to create a chat.</p>
                             ) : (
                                 <div className="space-y-2">
-                                    {friends.map((user) => (
-                                        <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-muted">
-                                            <Checkbox
-                                                id={`friend-${user.id}`}
-                                                checked={selectedFriends.includes(user.id)}
-                                                onCheckedChange={() => toggleFriend(user.id)}
-                                            />
-                                            <Label htmlFor={`friend-${user.id}`} className="flex items-center gap-3 cursor-pointer flex-1">
-                                                <Avatar className="h-8 w-8">
-                                                    <AvatarImage src={user.profilePicture || "/placeholder.svg"} alt={user.username} />
-                                                    <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
-                                                </Avatar>
-                                                <div>
-                                                    <p className="font-medium text-sm">{user.username}</p>
-                                                    <p className="text-xs text-muted-foreground">{user.email}</p>
-                                                </div>
-                                            </Label>
-                                        </div>
-                                    ))}
+                                    {friends.map((friend) => {
+                                        const isBlocked = isUserBlocked(friend.id);
+
+                                        return (
+                                            <div
+                                                key={friend.id}
+                                                className={`flex items-center space-x-2 p-2 rounded-md hover:bg-muted ${isBlocked ? 'opacity-70' : ''}`}
+                                            >
+                                                <Checkbox
+                                                    id={`friend-${friend.id}`}
+                                                    checked={selectedFriends.includes(friend.id)}
+                                                    onCheckedChange={() => toggleFriend(friend.id, isBlocked)}
+                                                    disabled={isBlocked}
+                                                />
+                                                <Label
+                                                    htmlFor={`friend-${friend.id}`}
+                                                    className={`flex items-center gap-3 cursor-pointer flex-1 ${isBlocked ? 'cursor-not-allowed' : ''}`}
+                                                >
+                                                    <div className="relative">
+                                                        <Avatar className="h-8 w-8">
+                                                            <AvatarImage src={friend.profilePicture || "/placeholder.svg"} alt={friend.username} />
+                                                            <AvatarFallback>{friend.username.charAt(0).toUpperCase()}</AvatarFallback>
+                                                        </Avatar>
+                                                        {isBlocked && (
+                                                            <div className="absolute inset-0 bg-background/80 flex items-center justify-center rounded-full">
+                                                                <Ban className="h-4 w-4 text-destructive" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-medium text-sm">
+                                                            {friend.username}
+                                                            {isBlocked && <span className="ml-2 text-xs text-destructive">(Blocked)</span>}
+                                                        </p>
+                                                        <p className="text-xs text-muted-foreground">{friend.email}</p>
+                                                    </div>
+                                                </Label>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </ScrollArea>

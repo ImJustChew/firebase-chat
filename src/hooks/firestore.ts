@@ -1,11 +1,47 @@
 import { auth, db } from "@/config/firebase";
-import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId } from 'firebase/firestore';
+import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs } from 'firebase/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
+import { useState, useEffect } from "react";
+
+export type User = {
+    id: string
+    address: string
+    email: string
+    phoneNumber: string
+    username: string
+    profilePicture?: string
+    blockedUsers?: string[]
+}
+
+const userConverter: FirestoreDataConverter<User> = {
+    toFirestore: (data: User) => {
+        return {
+            address: data.address,
+            email: data.email,
+            phoneNumber: data.phoneNumber,
+            username: data.username,
+            profilePicture: data.profilePicture,
+            blockedUsers: data.blockedUsers || [],
+        }
+    },
+    fromFirestore: (snapshot: any, options: any): User => {
+        const data = snapshot.data(options)
+        return {
+            id: snapshot.id,
+            address: data.address,
+            email: data.email,
+            phoneNumber: data.phoneNumber,
+            username: data.username,
+            profilePicture: data.profilePicture,
+            blockedUsers: data.blockedUsers || [],
+        }
+    }
+}
 
 export const useUserDoc = () => {
     const [user, loading, error] = useAuthState(auth);
-    return useDocumentData(user ? doc(db, "users", user?.uid || "") : undefined, {
+    return useDocumentData(user ? doc(db, "users", user.uid).withConverter(userConverter) : undefined, {
         snapshotListenOptions: { includeMetadataChanges: true },
     });
 }
@@ -17,14 +53,6 @@ type Room = {
     teaser?: Message
 }
 
-export type User = {
-    id: string
-    address: string
-    email: string
-    phoneNumber: string
-    username: string
-    profilePicture?: string
-}
 
 const roomsConverter: FirestoreDataConverter<Room> = {
     toFirestore: (data: Room) => {
@@ -137,12 +165,62 @@ const usersConverter: FirestoreDataConverter<User> = {
     }
 }
 
+// Add this new function to check if current user is blocked by another user
+export const useIsBlockedByUser = () => {
+    const [user] = useAuthState(auth);
 
+    return async (otherUserId: string): Promise<boolean> => {
+        if (!user) return false;
+
+        try {
+            const otherUserRef = doc(db, "users", otherUserId).withConverter(userConverter);
+            const otherUserDoc = await getDoc(otherUserRef);
+
+            if (otherUserDoc.exists()) {
+                const otherUserData = otherUserDoc.data();
+                return otherUserData.blockedUsers?.includes(user.uid) || false;
+            }
+
+            return false;
+        } catch (error) {
+            console.error("Error checking if blocked by user:", error);
+            return false;
+        }
+    };
+};
+
+// Modify useUsersCol to filter out users who have blocked the current user
 export const useUsersCol = () => {
-    return useCollectionData<User>(
-        query(collection(db, "users").withConverter(usersConverter)),
+    const [user] = useAuthState(auth);
+    const [allUsers = [], loading, error] = useCollectionData<User>(
+        query(collection(db, "users").withConverter(usersConverter))
     );
-}
+    const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+    const isBlockedByUser = useIsBlockedByUser();
+
+    // Filter out users who have blocked the current user
+    useEffect(() => {
+        const filterUsers = async () => {
+            if (!user || allUsers.length === 0) {
+                setFilteredUsers([]);
+                return;
+            }
+
+            const usersWhoHaventBlockedMe = await Promise.all(
+                allUsers.map(async (otherUser) => {
+                    const isBlocked = await isBlockedByUser(otherUser.id);
+                    return isBlocked ? null : otherUser;
+                })
+            );
+
+            setFilteredUsers(usersWhoHaventBlockedMe.filter(Boolean) as User[]);
+        };
+
+        filterUsers();
+    }, [user, allUsers]);
+
+    return [filteredUsers, loading, error] as [User[], boolean, Error | undefined];
+};
 
 export const createRoom = async (room: Omit<Room, "id">) => {
     const roomRef = doc(collection(db, "rooms"));
@@ -153,13 +231,16 @@ export const createRoom = async (room: Omit<Room, "id">) => {
 export const useSendMessage = (roomId: string) => {
     const [user] = useAuthState(auth);
     const [userData] = useUserDoc();
-    const username = userData?.username;
     const profilePicture = userData?.profilePicture || "/placeholder.svg?height=200&width=200";
 
     return async (message: Omit<Message, "id" | "user" | "timestamp">) => {
         if (!user) {
             throw new Error("User not authenticated");
         }
+        if (!userData) {
+            throw new Error("User data not found");
+        }
+        const username = userData.username;
         const messageRef = doc(collection(db, "rooms", roomId, "messages"));
         const messageData: Message = {
             ...message,
@@ -183,11 +264,18 @@ export const useDeleteMessage = (roomId: string) => {
     const [user] = useAuthState(auth);
     const userDoc = useUserDoc();
     const userData = userDoc[0] as User;
-    const userId = user?.uid || userData?.id || "";
-    const username = user?.displayName || userData?.username || "Unknown User";
-    const profilePicture = user?.photoURL || userData?.profilePicture || "/placeholder.svg?height=200&width=200";
 
     return async (messageId: string) => {
+        if (!user) {
+            throw new Error("User not authenticated");
+        }
+        if (!userData) {
+            throw new Error("User data not found");
+        }
+        const userId = user.uid || "";
+        const username = userData.username || "Unknown User";
+        const profilePicture = userData.profilePicture || "/placeholder.svg?height=200&width=200";
+
         const messageRef = doc(db, "rooms", roomId, "messages", messageId);
         await setDoc(messageRef, {
             isDeleted: true,
@@ -239,3 +327,108 @@ export const useUpdateUserProfile = () => {
         return userId;
     }
 }
+
+export const useGetUserById = () => {
+    return async (userId: string) => {
+        try {
+            // Reference to the user document
+            const userRef = doc(db, "users", userId).withConverter(usersConverter);
+            const userDoc = await getDoc(userRef);
+
+            if (userDoc.exists()) {
+                const userData = userDoc.data();
+                return userData;
+            } else {
+                return null;
+            }
+        } catch (error) {
+            console.error("Error getting user by ID:", error);
+            throw error;
+        }
+    };
+};
+
+export const useBlockUser = () => {
+    const [user] = useAuthState(auth);
+
+    return async (userId: string) => {
+        if (!user) {
+            throw new Error("User not authenticated");
+        }
+
+        try {
+            // Update the user's document to add the blocked user to the blockedUsers array
+            const userDocRef = doc(db, "users", user.uid);
+            await updateDoc(userDocRef, {
+                blockedUsers: arrayUnion(userId)
+            });
+
+            return true;
+        } catch (error) {
+            console.error("Error blocking user:", error);
+            throw error;
+        }
+    };
+};
+
+export const useUnblockUser = () => {
+    const [user] = useAuthState(auth);
+
+    return async (userId: string) => {
+        if (!user) {
+            throw new Error("User not authenticated");
+        }
+
+        try {
+            // Update the user's document to remove the blocked user from the blockedUsers array
+            const userDocRef = doc(db, "users", user.uid);
+            await updateDoc(userDocRef, {
+                blockedUsers: arrayRemove(userId)
+            });
+
+            return true;
+        } catch (error) {
+            console.error("Error unblocking user:", error);
+            throw error;
+        }
+    };
+};
+
+export const useIsUserBlocked = () => {
+    const [userProfile] = useUserDoc();
+
+    return (userId: string) => {
+        if (!userProfile || !userProfile.blockedUsers) {
+            return false;
+        }
+
+        return userProfile.blockedUsers.includes(userId);
+    };
+};
+
+export const useGetBlockedUsers = () => {
+    const [userProfile] = useUserDoc();
+
+    return async () => {
+        if (!userProfile || !userProfile.blockedUsers || userProfile.blockedUsers.length === 0) {
+            return [];
+        }
+
+        try {
+            const blockedUserIds = userProfile.blockedUsers;
+
+            // Use a single query to get all blocked users at once
+            const q = query(
+                collection(db, "users").withConverter(usersConverter),
+                where(documentId(), "in", blockedUserIds)
+            );
+
+            const snapshot = await getDocs(q);
+            return snapshot.docs.map(doc => doc.data());
+
+        } catch (error) {
+            console.error("Error getting blocked users:", error);
+            throw error;
+        }
+    };
+};

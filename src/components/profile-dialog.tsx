@@ -6,8 +6,14 @@ import { Label } from "./ui/label";
 import { Input } from "./ui/input";
 import { Separator } from "./ui/separator";
 import { Button } from "./ui/button";
-import { LogOut } from "lucide-react";
-import { useUserDoc, useUpdateUserProfile } from '@/hooks/firestore';
+import { LogOut, UserX } from "lucide-react";
+import {
+    useUserDoc,
+    useUpdateUserProfile,
+    useGetUserById,
+    useUnblockUser,
+    useGetBlockedUsers
+} from '@/hooks/firestore';
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth } from "@/config/firebase";
 import { DialogTrigger } from "@radix-ui/react-dialog";
@@ -28,7 +34,6 @@ function ProfileEditor() {
         address: userProfile?.address || "",
     })
 
-    // Update the form data when userProfile changes
     useEffect(() => {
         if (userProfile) {
             setFormData({
@@ -39,8 +44,6 @@ function ProfileEditor() {
             })
         }
     }, [userProfile, user])
-
-
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target
@@ -112,10 +115,82 @@ function ProfileEditor() {
     )
 }
 
+function BlockedUsersList() {
+    const [blockedUserProfiles, setBlockedUserProfiles] = useState<any[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const getBlockedUsers = useGetBlockedUsers();
+    const unblockUser = useUnblockUser();
+    const [userProfile] = useUserDoc();
+
+    const fetchBlockedUsers = async () => {
+        setIsLoading(true);
+        try {
+            const blockedUsers = await getBlockedUsers();
+            setBlockedUserProfiles(blockedUsers);
+        } catch (error) {
+            console.error("Error fetching blocked users:", error);
+            toast("Failed to load blocked users");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchBlockedUsers();
+    }, [userProfile?.blockedUsers]);
+
+    const handleUnblock = async (userId: string) => {
+        try {
+            await unblockUser(userId);
+            toast("User unblocked successfully");
+            fetchBlockedUsers();
+        } catch (error) {
+            toast("Failed to unblock user");
+        }
+    };
+
+    if (isLoading) {
+        return <div className="py-8 text-center text-muted-foreground">Loading blocked users...</div>;
+    }
+
+    if (!blockedUserProfiles.length) {
+        return <div className="py-8 text-center text-muted-foreground">You haven't blocked any users</div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <h3 className="text-sm font-medium">Blocked Users</h3>
+            <div className="space-y-2">
+                {blockedUserProfiles.map((profile) => (
+                    <div key={profile.id} className="flex items-center justify-between p-2 rounded-md border">
+                        <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8">
+                                <AvatarImage src={profile.profilePicture || "/placeholder.svg"} />
+                                <AvatarFallback>{profile.username?.[0]?.toUpperCase() || "U"}</AvatarFallback>
+                            </Avatar>
+                            <div>
+                                <p className="text-sm font-medium">{profile.username}</p>
+                                <p className="text-xs text-muted-foreground">{profile.email}</p>
+                            </div>
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleUnblock(profile.id)}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                            Unblock
+                        </Button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 const ProfileDialog = ({ children }: { children: React.ReactNode }) => {
     const [user] = useAuthState(auth);
     const [userProfile] = useUserDoc();
-
 
     return (
         <Dialog>
@@ -127,9 +202,13 @@ const ProfileDialog = ({ children }: { children: React.ReactNode }) => {
                     <DialogTitle>User Settings</DialogTitle>
                 </DialogHeader>
                 <Tabs defaultValue="profile">
-                    <TabsList className="grid w-full grid-cols-2 mb-4">
+                    <TabsList className="grid w-full grid-cols-3 mb-4">
                         <TabsTrigger value="profile">Profile</TabsTrigger>
                         <TabsTrigger value="account">Account</TabsTrigger>
+                        <TabsTrigger value="blocked">
+                            <UserX className="h-4 w-4 mr-2" />
+                            Blocked
+                        </TabsTrigger>
                     </TabsList>
                     <TabsContent value="profile">
                         <ProfileEditor />
@@ -153,10 +232,13 @@ const ProfileDialog = ({ children }: { children: React.ReactNode }) => {
                             </DialogFooter>
                         </div>
                     </TabsContent>
+                    <TabsContent value="blocked">
+                        <BlockedUsersList />
+                    </TabsContent>
                 </Tabs>
             </DialogContent>
         </Dialog>
     )
 }
 
-export default ProfileDialog
+export default ProfileDialog;

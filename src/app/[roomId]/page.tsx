@@ -29,6 +29,8 @@ import MessageSearch from "@/components/message-search";
 import { generateAndSendBotResponses, processSystemCommands } from '@/services/bot-service';
 import { useLoveContext } from '@/components/love-provider';
 
+export const dynamic = 'force-dynamic';
+
 const AttachmentViewerDialog = ({ attachment, children }: { attachment: Attachment, children: React.ReactNode }) => {
     return (
         <Dialog>
@@ -96,6 +98,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     // Process messages to filter out system commands but track which ones were executed
     const processedMessages: (Message & {
         systemCommands?: { command: string }[];
+        metaCommands?: { key: string, value: string }[];
     })[] = useMemo(() => {
         return messages.map(message => {
             if (!message.content) return message;
@@ -104,13 +107,14 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
             if (!message.user.id.includes('_bot')) return message;
 
             // Process the message content to identify system commands
-            const { processedMessage, commands, containedCommands } = processSystemCommands(message.content);
+            const { processedMessage, commands, containedCommands, metaCommands } = processSystemCommands(message.content);
 
             // Return a new message object with filtered content and command metadata
             return {
                 ...message,
                 content: processedMessage,
-                systemCommands: containedCommands ? commands : undefined
+                systemCommands: containedCommands ? commands : undefined,
+                metaCommands: metaCommands?.length ? metaCommands : undefined
             };
         });
     }, [messages]);
@@ -361,23 +365,6 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                     </Tooltip>
                 </TooltipProvider>}
 
-                {!room?.bot && (
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                >
-                                    <Bot className="h-4 w-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Chatbot</TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                )}
-
                 <TooltipProvider>
                     <Tooltip>
                         <TooltipTrigger asChild>
@@ -484,6 +471,15 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                                                         ))}
                                                     </div>
                                                 )}
+                                                {message.metaCommands && message.metaCommands.length > 0 && (
+                                                    <div className="mt-1 text-xs text-blue-500/70 italic">
+                                                        {message.metaCommands.map((meta, i) => (
+                                                            <div key={i} className="rounded-sm bg-blue-500/10 px-2 py-1 inline-block mr-2 mb-1">
+                                                                Bot memorized: {meta.value}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                                 {message.attachments &&
                                                     !message.isDeleted &&
                                                     message.attachments.map((attachment) => (
@@ -548,6 +544,15 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                                                         {message.systemCommands.map((cmd, i) => (
                                                             <div key={i} className="rounded-sm bg-primary/10 px-2 py-1 inline-block mr-2 mb-1">
                                                                 [system command: {cmd.command} executed]
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {message.metaCommands && message.metaCommands.length > 0 && (
+                                                    <div className="mt-1 text-xs text-blue-500/70 italic">
+                                                        {message.metaCommands.map((meta, i) => (
+                                                            <div key={i} className="rounded-sm bg-blue-500/10 px-2 py-1 inline-block mr-2 mb-1">
+                                                                Bot memorized: {meta.value}
                                                             </div>
                                                         ))}
                                                     </div>

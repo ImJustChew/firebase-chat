@@ -287,6 +287,8 @@ export async function initUserBotRoom(
 
     // Generate first greeting using AI
     try {
+        // Navigate to the new room
+        navigate(roomId);
         // Create a welcome prompt based on the bot's personality
         const welcomePrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality. 
 Generate an engaging welcome message introducing yourself to a new user in a chat app. 
@@ -335,8 +337,6 @@ Keep your response short and spaced out like actual chat messages.`;
         );
     }
 
-    // Navigate to the new room
-    navigate(roomId);
 
     return roomId;
 }
@@ -345,16 +345,25 @@ Keep your response short and spaced out like actual chat messages.`;
 export const SYSTEM_COMMAND_REGEX = /\/system:([a-z-]+):?(.*)/;
 
 // Process system commands in messages
-export function processSystemCommands(message: string): { processedMessage: string, containedCommands: boolean, commands: Array<{ command: string, params: string }> } {
+export function processSystemCommands(message: string): {
+    processedMessage: string,
+    containedCommands: boolean,
+    commands: Array<{ command: string, params: string }>,
+    metaCommands: Array<{ key: string, value: string }>
+} {
     const lines = message.split('\n');
     const processedLines: string[] = [];
     let containedCommands = false;
     const commands: Array<{ command: string, params: string }> = [];
+    const metaCommands: Array<{ key: string, value: string }> = [];
 
     for (const line of lines) {
-        // Skip processing meta commands - they should remain in the message
-        if (line.match(/^\/meta:[^:]+:.+/)) {
-            processedLines.push(line);
+        // Handle meta commands - track them separately
+        const metaMatch = line.match(/^\/meta:([^:]+):(.+)/);
+        if (metaMatch) {
+            const [_, key, value] = metaMatch;
+            metaCommands.push({ key, value });
+            // Don't include meta commands in the actual message
             continue;
         }
 
@@ -374,7 +383,8 @@ export function processSystemCommands(message: string): { processedMessage: stri
     return {
         processedMessage: processedLines.join('\n').trim(),
         containedCommands,
-        commands
+        commands,
+        metaCommands
     };
 }
 

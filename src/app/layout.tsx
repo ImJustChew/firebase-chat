@@ -24,6 +24,7 @@ import ProfileDialog from "@/components/profile-dialog";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { LoveProvider } from "@/components/love-provider";
 import { useAuthState } from "react-firebase-hooks/auth";
+import { SYSTEM_COMMAND_REGEX } from "@/services/bot-service";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -45,10 +46,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const router = useRouter();
 
   const rooms = unsortedRoom.sort((a, b) => {
-    // Pin rooms without teasers (newly created) at the top
     if (!a.teaser && b.teaser) return -1;
     if (a.teaser && !b.teaser) return 1;
-    // If both have teasers, sort by timestamp as before
     if (a.teaser && b.teaser) {
       return (b.teaser.timestamp?.toDate() ?? new Date()).getTime() - (a.teaser.timestamp?.toDate() ?? new Date()).getTime();
     }
@@ -57,7 +56,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const roomId = pathname.split("/")[1];
 
-  // Reset unread state when navigating to a room
   useEffect(() => {
     if (roomId) {
       setUnreadRooms(prev => ({
@@ -67,11 +65,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
   }, [roomId]);
 
-  // Initialize tracking for rooms
   useEffect(() => {
     if (!rooms.length || !user) return;
 
-    // Store initial state of all rooms for comparison
     const roomsMap: Record<string, any> = {};
     rooms.forEach(room => {
       roomsMap[room.id] = {
@@ -82,17 +78,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         } : null
       };
 
-      // Add room to initialized set
       initializedRoomsRef.current.add(room.id);
     });
 
-    // Only set this on first load when previousRoomsRef is empty
     if (Object.keys(previousRoomsRef.current).length === 0) {
       previousRoomsRef.current = roomsMap;
     }
   }, [rooms, user]);
 
-  // Track new messages
   useEffect(() => {
     if (!rooms.length || !user || !userAuth) return;
 
@@ -100,12 +93,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     let hasChanges = false;
 
     rooms.forEach(room => {
-      // Skip if room isn't initialized (meaning we just loaded the app)
       if (!initializedRoomsRef.current.has(room.id)) return;
 
       const prevRoomData = previousRoomsRef.current[room.id];
 
-      // Check if this is a new message and not from the current user
       if (room.teaser &&
         prevRoomData &&
         room.teaser.timestamp &&
@@ -123,7 +114,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       setUnreadRooms(newUnreadState);
     }
 
-    // Update the previous state for comparison in the next render
     const updatedRoomsMap: Record<string, any> = {};
     rooms.forEach(room => {
       updatedRoomsMap[room.id] = {
@@ -137,14 +127,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     previousRoomsRef.current = updatedRoomsMap;
   }, [rooms, user, roomId, unreadRooms]);
 
-  // Create Fuse instance for fuzzy searching
   const fuse = useMemo(() => new Fuse(rooms, {
     keys: ['title', 'teaser.content', 'teaser.user.username'],
     threshold: 0.4,
     includeScore: true
   }), [rooms]);
 
-  // Filter rooms based on search query
   const filteredRooms = useMemo(() => {
     if (!searchQuery.trim()) return rooms;
     const results = fuse.search(searchQuery);
@@ -152,11 +140,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }, [fuse, searchQuery, rooms]);
 
   useEffect(() => {
-    // Select first chat by default
     if (rooms.length > 0 && !roomId && !isMobile) {
       router.push(`/${rooms[0].id}`);
     }
   }, [rooms, roomId, router, isMobile]);
+
+  const formatMessageContent = (content: string): string => {
+    if (!content) return content;
+
+    const lines = content.split('\n');
+    for (const line of lines) {
+      if (line.match(SYSTEM_COMMAND_REGEX)) {
+        return "Executed command: ...";
+      }
+    }
+
+    return content;
+  };
 
   return (
     <Sidebar collapsible="none" className="h-screen min-w-screen md:min-w-auto" hidden={isMobile && !!roomId}>
@@ -199,7 +199,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   {room.teaser ? (
                     <span className="line-clamp-2 w-[260px] whitespace-break-spaces text-xs">
                       <span className="font-medium">{room.teaser.user?.username}: </span>
-                      {room.teaser.content}
+                      {formatMessageContent(room.teaser.content)}
                     </span>
                   ) : (
                     <span className="line-clamp-2 w-[260px] whitespace-break-spaces text-xs text-muted-foreground">

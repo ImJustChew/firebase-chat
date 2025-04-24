@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, X, UserPlus, MoreHorizontal, Shield, Ban, Bot } from "lucide-react"
+import { Search, X, UserPlus, MoreHorizontal, Shield, Ban, Bot, Trash2 } from "lucide-react"
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -13,11 +13,23 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { useAuthState } from "react-firebase-hooks/auth"
-import { auth } from "@/config/firebase"
+import { auth, db } from "@/config/firebase"
 import { useBlockUser, useIsUserBlocked, useRoomDoc, useRoomMembers } from '@/hooks/firestore';
 import { BOT_CONFIGS } from "@/services/bot-service"
+import { deleteDoc, doc } from "firebase/firestore"
+import { useRouter } from "next/navigation"
 
 type User = {
     id: string
@@ -40,6 +52,8 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
     const blockUser = useBlockUser();
     const isUserBlocked = useIsUserBlocked();
     const [roomDoc] = useRoomDoc(roomId)
+    const router = useRouter();
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
     const [participants = [], loading, error] = useRoomMembers(roomId)
 
@@ -60,8 +74,22 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
         }
     };
 
+    const handleDeleteRoom = async () => {
+        if (!roomDoc || !roomDoc.bot) return;
+
+        try {
+            await deleteDoc(doc(db, "rooms", roomId));
+            toast.success("Room deleted successfully");
+            if (onClose) onClose();
+            router.push("/dashboard");
+        } catch (error) {
+            console.error("Error deleting room:", error);
+            toast.error("Failed to delete room");
+        }
+    };
+
     return (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full md:relative fixed inset-0 bg-background z-50 md:z-auto md:inset-auto">
             <div className="flex items-center justify-between p-3 border-b">
                 <h3 className="font-medium">Participants ({participants.length})</h3>
                 {onClose && (
@@ -156,6 +184,38 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
                     )}
                 </div>
             </ScrollArea>
+
+            {roomDoc && roomDoc.bot && (
+                <>
+                    <div className="p-3 border-t">
+                        <Button
+                            variant="destructive"
+                            className="w-full"
+                            onClick={() => setIsDeleteDialogOpen(true)}
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete Room
+                        </Button>
+                    </div>
+
+                    <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This will permanently delete your chat room with {roomDoc.bot && BOT_CONFIGS[roomDoc.bot].name} and remove all associated messages. This action cannot be undone.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={handleDeleteRoom} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                    Delete
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                </>
+            )}
         </div>
     )
 }

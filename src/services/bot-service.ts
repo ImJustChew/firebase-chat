@@ -1,6 +1,8 @@
 import { getVertexAI, getGenerativeModel, Content } from "firebase/vertexai";
-import { Message, sendBotMessage, createBotRoom } from "@/hooks/firestore";
-import { app } from "@/config/firebase";
+import { Message, sendBotMessage, createBotRoom, deleteRoom } from "@/hooks/firestore";
+import { app, db } from "@/config/firebase";
+import { toast } from "sonner";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 
 // Bot-related types
 export type BotPersonality = string;
@@ -88,7 +90,7 @@ Keep your responses concise, typically 1-3 short paragraphs. You're in a chat ap
 }
 
 // Generate bot responses using Vertex AI
-export async function generateBotResponse(botName: string, messageHistory: Message[], currentMessage: string): Promise<string> {
+export async function generateBotResponse(botName: string, messageHistory: Message[], currentMessage: string, roomId?: string): Promise<string> {
     const botConfig = BOT_CONFIGS[botName];
 
     if (!botConfig) {
@@ -96,7 +98,23 @@ export async function generateBotResponse(botName: string, messageHistory: Messa
         return "I'm having trouble processing that. Please try again later.";
     }
 
-    const systemPrompt = getSystemPrompt(botConfig);
+    let systemPrompt = getSystemPrompt(botConfig);
+
+    // Add system command information specifically for romantic_bot
+    if (botName === "romantic_bot") {
+        systemPrompt += `\n\nIMPORTANT: You can use system commands when appropriate. Include them on their own line:
+/system:rename-room:[roomId]:[newName] - Renames a specific room
+/system:rename-room:${roomId}:[newName] - Renames the current room
+/system:delete-room:[roomId] - Deletes a specific room
+/meta:[key]:[value] - Stores context information without performing any action
+
+For example:
+/meta:roomId:abc123 - Stores room ID for future reference
+/meta:intent:deletion - Records your intention to delete something
+
+These meta commands don't perform any actions but help maintain context for future interactions.
+Don't reference these commands directly in your regular messages.`;
+    }
 
     try {
         // Format conversation history for the AI model
@@ -137,12 +155,20 @@ export async function generateAndSendBotResponses(
     }
 
     try {
-        const response = await generateBotResponse(botName, messageHistory, currentMessage);
-
-        // Check if response should be split into multiple messages
+        const response = await generateBotResponse(botName, messageHistory, currentMessage, roomId);
         const messages = splitIntoMultipleMessages(response);
 
-        // Send each message with a delay
+        // Special handling for romantic_bot - use the system command processor
+        if (botName === "romantic_bot") {
+            await sendProcessedBotMessages(
+                roomId,
+                botName,
+                messages
+            );
+            return;
+        }
+
+        // Standard message sending for other bots
         for (let i = 0; i < messages.length; i++) {
             const message = messages[i];
             // Add a delay between messages for a more natural feel
@@ -311,4 +337,176 @@ Keep your response short and spaced out like actual chat messages.`;
     navigate(roomId);
 
     return roomId;
+}
+
+// System command processing
+export const SYSTEM_COMMAND_REGEX = /\/system:([a-z-]+):?(.*)/;
+
+// Process system commands in messages
+export function processSystemCommands(message: string): { processedMessage: string, containedCommands: boolean, commands: Array<{ command: string, params: string }> } {
+    const lines = message.split('\n');
+    const processedLines: string[] = [];
+    let containedCommands = false;
+    const commands: Array<{ command: string, params: string }> = [];
+
+    for (const line of lines) {
+        // Skip processing meta commands - they should remain in the message
+        if (line.match(/^\/meta:[^:]+:.+/)) {
+            processedLines.push(line);
+            continue;
+        }
+
+        const match = line.match(SYSTEM_COMMAND_REGEX);
+        if (match) {
+            containedCommands = true;
+            const [_, command, params] = match;
+            commands.push({ command, params: params || '' });
+
+            // Don't include system commands in the actual message
+            continue;
+        }
+
+        processedLines.push(line);
+    }
+
+    return {
+        processedMessage: processedLines.join('\n').trim(),
+        containedCommands,
+        commands
+    };
+}
+
+// Interpret user response (yes/no)
+export function interpretUserResponse(messageText: string): 'affirmative' | 'negative' | 'unknown' {
+    const text = messageText.toLowerCase();
+
+    const affirmativeWords = ['yes', 'yeah', 'sure', 'okay', 'ok', 'yep', 'please', 'delete', 'remove'];
+    if (affirmativeWords.some(word => text.includes(word))) {
+        return 'affirmative';
+    }
+
+    const negativeWords = ['no', 'nope', 'don\'t', 'dont', 'stop', 'wait', 'keep'];
+    if (negativeWords.some(word => text.includes(word))) {
+        return 'negative';
+    }
+
+    return 'unknown';
+}
+
+// Execute system commands
+export async function executeSystemCommand(command: string, params: string): Promise<void> {
+    try {
+        switch (command) {
+            case 'delete-room':
+                const roomId = params.trim();
+                if (!roomId) return;
+
+                console.log(`[SYSTEM COMMAND]: Deleting room ${roomId}`);
+                // Display UI notification
+                toast.info(`System: Deleting room ${roomId}`);
+
+                // Execute the command without tracking detailed results
+                await deleteRoom(roomId);
+                break;
+
+            case 'rename-room':
+                // Format for rename-room command: roomId:newName
+                const [renameRoomId, ...nameParts] = params.split(':');
+                const newName = nameParts.join(':'); // Rejoin in case the new name contained colons
+
+                if (!renameRoomId || !newName) {
+                    console.warn(`Invalid rename-room parameters: ${params}`);
+                    return;
+                }
+
+                console.log(`[SYSTEM COMMAND]: Renaming room ${renameRoomId} to "${newName}"`);
+                toast.info(`System: Renaming room to "${newName}"`);
+
+                try {
+                    const roomRef = doc(db, "rooms", renameRoomId);
+                    await updateDoc(roomRef, {
+                        title: newName
+                    });
+                } catch (error) {
+                    console.error(`Error renaming room ${renameRoomId}:`, error);
+                    toast.error(`Failed to rename room: ${error}`);
+                }
+                break;
+
+            case 'block-user':
+                const userId = params.trim();
+                if (!userId) {
+                    console.warn('Block user command missing userId parameter');
+                    return;
+                }
+
+                console.log(`[SYSTEM COMMAND]: Blocking user ${userId}`);
+                toast.error(`System: User ${userId} has been blocked`);
+
+                try {
+                    // Update user document to mark as blocked
+                    const userRef = doc(db, "users", userId);
+
+                    // Check if user exists
+                    const userDoc = await getDoc(userRef);
+                    if (!userDoc.exists()) {
+                        console.warn(`User ${userId} does not exist`);
+                        return;
+                    }
+
+                    await updateDoc(userRef, {
+                        blockedFromRomanticBot: true,
+                        blockedAt: new Date()
+                    });
+
+                } catch (error) {
+                    console.error(`Error blocking user ${userId}:`, error);
+                    toast.error(`Failed to block user: ${error}`);
+                }
+                break;
+
+            default:
+                console.warn(`Unknown system command: ${command}`);
+                toast.warning(`System: Unknown command "${command}"`);
+                break;
+        }
+    } catch (error) {
+        console.error(`Error executing system command ${command}:`, error);
+        toast.error(`System command failed: ${command}`);
+    }
+}
+
+// Send bot messages with system command processing
+export async function sendProcessedBotMessages(
+    roomId: string,
+    botName: string,
+    messages: string[]
+): Promise<void> {
+    const botConfig = getBotConfig(botName);
+    if (!botConfig) return;
+
+    for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+
+        // Process the message for system commands
+        const { processedMessage, commands } = processSystemCommands(message);
+
+        // Execute any commands found
+        for (const { command, params } of commands) {
+            executeSystemCommand(command, params);
+        }
+
+        // Add a delay between messages to make it feel more natural
+        if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        await sendBotMessage(
+            roomId,
+            botName,
+            botConfig.displayName,
+            botConfig.profilePicture,
+            message
+        );
+    }
 }

@@ -32,8 +32,8 @@ service cloud.firestore {
 
       // Allow delete if user is a member and channel is bot
       allow delete: if 
-        request.auth.uid in request.resource.data.members &&
-        request.resource.data.bot != null;
+        request.auth.uid in resource.data.members &&
+        resource.data.bot != null;
           
       
       match /messages/{messageId} {

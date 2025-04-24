@@ -343,6 +343,17 @@ export const useGetUserById = () => {
     };
 };
 
+export const blockUser = async (userId: string) => {
+    const user = auth.currentUser;
+    if (!user) {
+        throw new Error("User not authenticated");
+    }
+    const userDocRef = doc(db, "users", user.uid);
+    await updateDoc(userDocRef, {
+        blockedUsers: arrayUnion(userId)
+    });
+}
+
 export const useBlockUser = () => {
     const [user] = useAuthState(auth);
 
@@ -352,12 +363,7 @@ export const useBlockUser = () => {
         }
 
         try {
-            // Update the user's document to add the blocked user to the blockedUsers array
-            const userDocRef = doc(db, "users", user.uid);
-            await updateDoc(userDocRef, {
-                blockedUsers: arrayUnion(userId)
-            });
-
+            await blockUser(userId);
             return true;
         } catch (error) {
             console.error("Error blocking user:", error);

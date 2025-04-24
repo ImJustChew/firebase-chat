@@ -4,7 +4,7 @@ import { DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { auth } from "@/config/firebase";
 import { Dialog } from "@radix-ui/react-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -15,6 +15,7 @@ import {
     useRoomMessagesCol,
     useSendMessage,
     useIsUserBlocked,
+    Message,
 } from '@/hooks/firestore';
 import { Bot, File, Gift, Hash, Send, Trash2, Users, Bell } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -25,7 +26,7 @@ import { useParams, useRouter } from "next/navigation";
 import GifPicker from "@/components/gif-picker";
 import ParticipantsList from "@/components/participants-list";
 import MessageSearch from "@/components/message-search";
-import { generateAndSendBotResponses } from '@/services/bot-service';
+import { generateAndSendBotResponses, processSystemCommands } from '@/services/bot-service';
 import { useLoveContext } from '@/components/love-provider';
 
 const AttachmentViewerDialog = ({ attachment, children }: { attachment: Attachment, children: React.ReactNode }) => {
@@ -91,6 +92,29 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
 
     const sendMessage = useSendMessage(roomId);
     const deleteMessage = useDeleteMessage(roomId);
+
+    // Process messages to filter out system commands but track which ones were executed
+    const processedMessages: (Message & {
+        systemCommands?: { command: string }[];
+    })[] = useMemo(() => {
+        console.log("Processing messages...", messages);
+        return messages.map(message => {
+            if (!message.content) return message;
+
+            // Only process messages from bots
+            if (!message.user.id.includes('_bot')) return message;
+
+            // Process the message content to identify system commands
+            const { processedMessage, commands, containedCommands } = processSystemCommands(message.content);
+
+            // Return a new message object with filtered content and command metadata
+            return {
+                ...message,
+                content: processedMessage,
+                systemCommands: containedCommands ? commands : undefined
+            };
+        });
+    }, [messages]);
 
     // If roomdoc loaded and no room, redirect to home
     useEffect(() => {
@@ -377,7 +401,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
         <div className="flex flex-1 overflow-hidden">
             <ScrollArea className="flex-1 px-4">
                 <div className="py-4 space-y-4">
-                    {messages.length === 0 ? (
+                    {processedMessages.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full py-10">
                             <div className="bg-secondary p-6 rounded-full mb-4">
                                 <Hash className="h-12 w-12 text-primary" />
@@ -392,8 +416,8 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                             </p>
                         </div>
                     ) : (
-                        messages.map((message, index) => {
-                            const prevMessage = index > 0 ? messages[index - 1] : null
+                        processedMessages.map((message, index) => {
+                            const prevMessage = index > 0 ? processedMessages[index - 1] : null
                             const isOwnMessage = message.user.id === user?.uid;
                             const isBlockedUser = isUserBlocked(message.user.id);
                             const showHeader =
@@ -452,6 +476,15 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                                                 <div className={message.isDeleted ? "italic text-muted-foreground" : ""}>
                                                     <p className="break-words">{message.content}</p>
                                                 </div>
+                                                {message.systemCommands && message.systemCommands.length > 0 && (
+                                                    <div className="mt-1 text-xs text-primary/70 italic">
+                                                        {message.systemCommands.map((cmd, i) => (
+                                                            <div key={i} className="rounded-sm bg-primary/10 px-2 py-1 inline-block mr-2 mb-1">
+                                                                [system command: {cmd.command} executed]
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                                 {message.attachments &&
                                                     !message.isDeleted &&
                                                     message.attachments.map((attachment) => (
@@ -511,6 +544,15 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                                         <div className="group flex">
                                             <div className={message.isDeleted ? "italic text-muted-foreground flex-1" : "flex-1"}>
                                                 <p className="break-words">{message.content}</p>
+                                                {message.systemCommands && message.systemCommands.length > 0 && (
+                                                    <div className="mt-1 text-xs text-primary/70 italic">
+                                                        {message.systemCommands.map((cmd, i) => (
+                                                            <div key={i} className="rounded-sm bg-primary/10 px-2 py-1 inline-block mr-2 mb-1">
+                                                                [system command: {cmd.command} executed]
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                             {message.user.id === user?.uid && !message.isDeleted && (
                                                 <Button

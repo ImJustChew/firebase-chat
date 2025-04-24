@@ -97,7 +97,6 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     const processedMessages: (Message & {
         systemCommands?: { command: string }[];
     })[] = useMemo(() => {
-        console.log("Processing messages...", messages);
         return messages.map(message => {
             if (!message.content) return message;
 

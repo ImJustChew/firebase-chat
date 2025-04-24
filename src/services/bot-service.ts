@@ -1,5 +1,5 @@
 import { getVertexAI, getGenerativeModel, Content } from "firebase/vertexai";
-import { Message, sendBotMessage, createBotRoom, deleteRoom } from "@/hooks/firestore";
+import { Message, sendBotMessage, createBotRoom, deleteRoom, blockUser } from "@/hooks/firestore";
 import { app, db } from "@/config/firebase";
 import { toast } from "sonner";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
@@ -106,6 +106,8 @@ export async function generateBotResponse(botName: string, messageHistory: Messa
 /system:rename-room:[roomId]:[newName] - Renames a specific room
 /system:rename-room:${roomId}:[newName] - Renames the current room
 /system:delete-room:[roomId] - Deletes a specific room
+/system:block-user:[userId] - Blocks a specific user
+/system:love-penalty:[durationMinutes]:[targetType]:[targetId] - Activates a love penalty for a specific duration
 /meta:[key]:[value] - Stores context information without performing any action
 
 For example:
@@ -444,25 +446,27 @@ export async function executeSystemCommand(command: string, params: string): Pro
                 toast.error(`System: User ${userId} has been blocked`);
 
                 try {
-                    // Update user document to mark as blocked
-                    const userRef = doc(db, "users", userId);
-
-                    // Check if user exists
-                    const userDoc = await getDoc(userRef);
-                    if (!userDoc.exists()) {
-                        console.warn(`User ${userId} does not exist`);
-                        return;
-                    }
-
-                    await updateDoc(userRef, {
-                        blockedFromRomanticBot: true,
-                        blockedAt: new Date()
-                    });
-
+                    await blockUser(userId);
                 } catch (error) {
                     console.error(`Error blocking user ${userId}:`, error);
                     toast.error(`Failed to block user: ${error}`);
                 }
+                break;
+
+            case 'love-penalty':
+                const [durationMinutes, targetType, targetId] = params.split(':');
+
+                console.log(`[SYSTEM COMMAND]: Activating love penalty for ${durationMinutes} minute(s), target type: ${targetType}, ID: ${targetId}`);
+                toast.error(`System: Your declaration of love to someone else has activated a penalty`);
+
+                // Set penalty data in localStorage
+                const endTime = Date.now() + (parseInt(durationMinutes) * 60 * 1000);
+                localStorage.setItem('lovePenaltyEnd', endTime.toString());
+                localStorage.setItem('lovePenaltyTargetType', targetType || '');
+                localStorage.setItem('lovePenaltyTargetId', targetId || '');
+
+                // Dispatch a custom event to notify components about the penalty
+                window.dispatchEvent(new CustomEvent('lovePenaltyActivated'));
                 break;
 
             default:

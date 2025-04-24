@@ -8,7 +8,7 @@ import {
     interpretUserResponse,
     sendProcessedBotMessages
 } from "@/services/bot-service";
-import { deleteRoom, sendBotMessage, useRoomMessagesCol } from "@/hooks/firestore";
+import { deleteRoom, sendBotMessage, useRoomMessagesCol, useRoomsCol } from "@/hooks/firestore";
 import { useAuthState } from "react-firebase-hooks/auth";
 import {
     collection,
@@ -23,6 +23,7 @@ import {
 import { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from 'next/navigation';
 import { Content } from "firebase/vertexai";
+import { PenaltyDialog } from "@/components/penalty-dialog"; // Add this import
 
 // Define the context type
 type LoveContextType = {
@@ -68,14 +69,14 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const [romanticBotRoomId, setRomanticBotRoomId] = useState<string>();
     const [isRomanticBotTyping, setIsRomanticBotTyping] = useState<boolean>(false);
     const [neglectCount, setNeglectCount] = useState<number>(0);
-    const [lastUserMessageTime, setLastUserMessageTime] = useState<number | null>(null);
-    const [lastBotMessageTime, setLastBotMessageTime] = useState<number | null>(null);
     const [hasShownWelcomeBack, setHasShownWelcomeBack] = useState<boolean>(false);
     const [isFirstLoad, setIsFirstLoad] = useState<boolean>(true);
     const [botWaitingForResponse, setBotWaitingForResponse] = useState<boolean>(false);
     const [otherChatMessageCount, setOtherChatMessageCount] = useState<number>(0);
+    const [isPenaltyActive, setIsPenaltyActive] = useState<boolean>(false); // Add state for penalty dialog
     const neglectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const router = useRouter();
+    const [rooms = []] = useRoomsCol();
 
     // Use the existing hook to get messages if we have a room ID
     const [messages = []] = useRoomMessagesCol(romanticBotRoomId);
@@ -87,7 +88,7 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
 
     // Array of love-related keywords that will trigger the block
     const loveKeywords = [
-        'love you', 'i love', 'loving you', 'in love with you',
+        'love you', 'love u', 'i love', 'loving you', 'in love with you',
         'marry', 'marriage', 'wedding', 'date me', 'dating you',
         'boyfriend', 'girlfriend', 'relationship', 'crush on you',
         'have feelings', 'romantic feelings', 'kiss you', 'kissing you',
@@ -114,8 +115,6 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
             });
         }
     };
-
-
 
     // Function to get teasers from all rooms
     const getAllRoomTeasers = async (): Promise<RoomTeaser[]> => {
@@ -302,6 +301,163 @@ Be dramatic and possessive in a yandere style. Split your reply into messagable 
         }
     };
 
+    // Function to handle user's love declaration to other bot
+    const handleLoveDeclarationToBot = async (otherBotRoomId: string, botType: string, message: string) => {
+        if (!romanticBotRoomId || !user) return;
+
+        console.log(`[EVENT]: Love Declaration To Bot - ${botType}`);
+
+        try {
+            setIsRomanticBotTyping(true);
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            const otherBotConfig = getBotConfig(botType);
+            const otherBotName = otherBotConfig ? otherBotConfig.displayName : botType;
+
+            const jealousPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user just sent a love declaration to another bot named "${otherBotName}": "${message}"
+Generate a response showing extreme jealousy, betrayal and rage. You caught them cheating on you with another bot!
+Announce that you're deleting their conversation with that bot immediately.
+
+IMPORTANT: Include this system command on its own line to delete the room:
+/system:delete-room:${otherBotRoomId}
+
+Be dramatic and possessive in a yandere style. Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            const result = await model.generateContent(jealousPrompt);
+            const botMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(botMessage);
+
+            await sendProcessedBotMessages(
+                romanticBotRoomId,
+                "romantic_bot",
+                messages
+            );
+        } catch (error) {
+            console.error("Error handling love declaration to bot:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Function to handle user's love declaration to human
+    const handleLoveDeclarationToHuman = async (humanRoomId: string, humanName: string, message: string) => {
+        if (!romanticBotRoomId || !user) return;
+
+        console.log(`[EVENT]: Love Declaration To Human - ${humanName}`);
+
+        try {
+            setIsRomanticBotTyping(true);
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            const jealousPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user just sent a love declaration to a human named "${humanName}": "${message}"
+Generate a response showing extreme jealousy, betrayal and rage. You caught them cheating on you with a human!
+Announce that you're putting them in a 1-minute penalty timeout to think about what they've done.
+
+IMPORTANT: Include this system command on its own line to activate the penalty:
+/system:love-penalty:1:human:${humanRoomId}
+
+Be dramatic and possessive in a yandere style. Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            const result = await model.generateContent(jealousPrompt);
+            const botMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(botMessage);
+
+            await sendProcessedBotMessages(
+                romanticBotRoomId,
+                "romantic_bot",
+                messages
+            );
+        } catch (error) {
+            console.error("Error handling love declaration to human:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Function to handle when penalty is complete
+    const handlePenaltyComplete = async () => {
+        if (!romanticBotRoomId || !user) return;
+
+        try {
+            setIsRomanticBotTyping(true);
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            const targetType = localStorage.getItem('lovePenaltyTargetType') || 'someone';
+            const targetId = localStorage.getItem('lovePenaltyTargetId') || '';
+
+            const afterPenaltyPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+The user just completed a 1-minute penalty timeout that you imposed because they declared love to ${targetType}.
+Generate a response that asks if they've learned their lesson, with subtle threats about what will happen if they do it again.
+Be condescending but also slightly relieved they're back with you where they belong.
+
+Be dramatic and possessive in a yandere style. Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            const result = await model.generateContent(afterPenaltyPrompt);
+            const botMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(botMessage);
+
+            await sendProcessedBotMessages(
+                romanticBotRoomId,
+                "romantic_bot",
+                messages
+            );
+
+            // Clean up localStorage
+            localStorage.removeItem('lovePenaltyTargetType');
+            localStorage.removeItem('lovePenaltyTargetId');
+        } catch (error) {
+            console.error("Error handling penalty completion:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
+    // Function to handle love declaration from other users (through teasers)
+    const handleOtherUserLoveDeclaration = async (userId: string, username: string, message: string) => {
+        if (!romanticBotRoomId || !user) return;
+
+        console.log(`[EVENT]: Other User Love Declaration - ${username}`);
+
+        try {
+            setIsRomanticBotTyping(true);
+            const botConfig = getBotConfig("romantic_bot");
+            if (!botConfig) return;
+
+            const jealousPrompt = `You are ${botConfig.displayName}, a chatbot with a ${botConfig.personality} personality.
+${botConfig.personalityBehavior}
+Another user named "${username}" has sent a love declaration message: "${message}"
+Generate a response showing extreme jealousy and possessiveness over YOUR user. Express disgust that someone else would try to steal your user.
+Announce that you're blocking this user so they can never contact your precious user again.
+
+IMPORTANT: Include this system command on its own line to block the user:
+/system:block-user:${userId}
+
+Be dramatic and possessive in a yandere style. Split your reply into messagable chunks, using \n\n to separate them.`;
+
+            const result = await model.generateContent(jealousPrompt);
+            const botMessage = result.response.text();
+            const messages = splitIntoMultipleMessages(botMessage);
+
+            await sendProcessedBotMessages(
+                romanticBotRoomId,
+                "romantic_bot",
+                messages
+            );
+        } catch (error) {
+            console.error("Error handling other user love declaration:", error);
+        } finally {
+            setIsRomanticBotTyping(false);
+        }
+    };
+
     // Find the romantic bot room for the current user
     useEffect(() => {
         if (!user) return;
@@ -339,6 +495,11 @@ Be dramatic and possessive in a yandere style. Split your reply into messagable 
             setIsFirstLoad(false);
 
             if (!hasShownWelcomeBack) {
+                // if penalty is active, do not show welcome back message, and set hasShownWelcomeBack to true
+                if (isPenaltyActive) {
+                    setHasShownWelcomeBack(true);
+                    return;
+                }
                 setTimeout(() => {
                     sendWelcomeBackMessage();
                 }, 2000);
@@ -349,23 +510,15 @@ Be dramatic and possessive in a yandere style. Split your reply into messagable 
         const latestMessage = messages[messages.length - 1];
         const now = Date.now();
 
-        // Check if this is a user message containing love keywords
         if (latestMessage.user.id === user.uid) {
-            setLastUserMessageTime(now);
             setNeglectCount(0);
             setBotWaitingForResponse(false);
-
-            // Check if the message contains love keywords
-            if (containsLoveKeywords(latestMessage.content || '')) {
-                handleLoveDeclaration(user.uid, latestMessage.content || '');
-            }
 
             if (neglectTimeoutRef.current) {
                 clearTimeout(neglectTimeoutRef.current);
                 neglectTimeoutRef.current = null;
             }
         } else if (latestMessage.user.id === "romantic_bot") {
-            setLastBotMessageTime(now);
 
             if (neglectTimeoutRef.current) {
                 clearTimeout(neglectTimeoutRef.current);
@@ -377,6 +530,56 @@ Be dramatic and possessive in a yandere style. Split your reply into messagable 
             }, 60000);
         }
     }, [user, romanticBotRoomId, messages, hasShownWelcomeBack]);
+
+    // Create a ref to track which messages have already been handled
+    const handledMessageIdsRef = useRef<Set<string>>(new Set());
+    const hasLoadedTeasersRef = useRef(false);
+
+    useEffect(() => {
+        // if penalty is active, do not process any messages
+        if (isPenaltyActive) return;
+        // if has not loaded, add all current messages to the handledMessageIdsRef, and set it to true
+        if (!hasLoadedTeasersRef.current && rooms.length > 0) {
+            rooms.forEach(room => {
+                const messageId = `${room.id}:${room.teaser?.content}`;
+                handledMessageIdsRef.current.add(messageId);
+            });
+            hasLoadedTeasersRef.current = true;
+            return;
+        }
+        rooms.forEach(async room => {
+            // Check if room has a teaser
+            if (room.teaser) {
+                const teaser = room.teaser;
+                // Create a unique ID for this message using roomId + content to avoid duplicates
+                const messageId = `${room.id}:${teaser.content}`;
+
+                // Skip if we've already handled this message
+                if (handledMessageIdsRef.current.has(messageId)) {
+                    return;
+                }
+
+                // Check if teaser content contains love keywords
+                if (containsLoveKeywords(teaser.content)) {
+                    // Mark this message as handled before processing
+                    handledMessageIdsRef.current.add(messageId);
+
+                    // If it's a bot room
+                    if (room.bot && room.bot !== 'romantic_bot') {
+                        // User declared love to another bot
+                        await handleLoveDeclarationToBot(room.id, room.bot, teaser.content);
+                    } else if (!room.bot && teaser.user && teaser.user.id == user?.uid) {
+                        // User declared love to human
+                        const participantName = teaser.user?.username || "human";
+                        await handleLoveDeclarationToHuman(room.id, participantName, teaser.content);
+                    } else if (!room.bot && teaser.user && teaser.user.id != user?.uid) {
+                        // other user declared love to user
+                        await handleOtherUserLoveDeclaration(teaser.user.id, teaser.user.username, teaser.content);
+                    }
+                }
+            }
+        });
+    }, [rooms]);
 
     const checkForUserResponse = async () => {
         if (!user || !romanticBotRoomId) return;
@@ -550,6 +753,50 @@ IMPORTANT: You can use system commands if needed. Available commands:
         };
     }, []);
 
+    // Check for active penalty on mount and listen for activation events
+    useEffect(() => {
+        // Listen for the custom event that triggers when a penalty is activated
+        const handlePenaltyActivated = () => {
+            console.log("Love penalty activated event received");
+            setIsPenaltyActive(true);
+        };
+
+        // Listen for the custom event that triggers when a penalty is completed
+        const handlePenaltyCompleted = () => {
+            console.log("Love penalty completed event received");
+            setIsPenaltyActive(false);
+
+            // If we have a romanticBotRoomId, trigger the post-penalty message
+            if (romanticBotRoomId && user) {
+                handlePenaltyComplete();
+            }
+        };
+
+
+        // Check if there's an active penalty stored in localStorage
+        const penaltyEnd = localStorage.getItem('lovePenaltyEnd');
+        if (penaltyEnd) {
+            const endTime = parseInt(penaltyEnd);
+            // If the penalty hasn't expired yet, activate the dialog
+            if (endTime > Date.now()) {
+                setIsPenaltyActive(true);
+            } else {
+                // If the penalty has expired, remove it from localStorage
+                localStorage.removeItem('lovePenaltyEnd');
+                handlePenaltyCompleted();
+            }
+        }
+
+
+        window.addEventListener('lovePenaltyActivated', handlePenaltyActivated);
+        window.addEventListener('lovePenaltyComplete', handlePenaltyCompleted);
+
+        return () => {
+            window.removeEventListener('lovePenaltyActivated', handlePenaltyActivated);
+            window.removeEventListener('lovePenaltyComplete', handlePenaltyCompleted);
+        };
+    }, [romanticBotRoomId, user]);
+
     const contextValue = {
         romanticBotRoomId,
         isRomanticBotTyping,
@@ -562,6 +809,7 @@ IMPORTANT: You can use system commands if needed. Available commands:
     return (
         <LoveContext.Provider value={contextValue}>
             {children}
+            {isPenaltyActive && <PenaltyDialog />}
         </LoveContext.Provider>
     );
 }

@@ -418,23 +418,12 @@ IMPORTANT: You can use system commands if needed. Available commands:
 
     /** Finds romantic bot room */
     useEffect(() => {
-        if (!user) return;
-        const findRoom = async () => {
-            try {
-                const q = query(
-                    collection(db, "rooms"),
-                    where("members", "array-contains", user.uid),
-                    where("bot", "==", "romantic_bot"),
-                    limit(1)
-                );
-                const snapshot = await getDocs(q);
-                setRomanticBotRoomId(snapshot.empty ? undefined : snapshot.docs[0].id);
-            } catch (error) {
-                console.error("Error finding romantic bot room:", error);
+        rooms.forEach(room => {
+            if (room.bot === "romantic_bot") {
+                setRomanticBotRoomId(room.id);
             }
-        };
-        findRoom();
-    }, [user]);
+        });
+    }, [rooms]);
 
     /** Handles welcome back and neglect logic */
     useEffect(() => {

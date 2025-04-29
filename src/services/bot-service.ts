@@ -106,6 +106,7 @@ export async function generateBotResponse(botName: string, messageHistory: Messa
 /system:rename-room:[roomId]:[newName] - Renames a specific room
 /system:rename-room:${roomId}:[newName] - Renames the current room
 /system:delete-room:[roomId] - Deletes a specific room
+/system:rename-room:${roomId} - FORBIDDEN, do not allow deletion of your own room
 /system:block-user:[userId] - Blocks a specific user
 /system:love-penalty:[durationMinutes]:[targetType]:[targetId] - Activates a love penalty for a specific duration
 /meta:[key]:[value] - Stores context information without performing any action
@@ -115,7 +116,8 @@ For example:
 /meta:intent:deletion - Records your intention to delete something
 
 These meta commands don't perform any actions but help maintain context for future interactions.
-Don't reference these commands directly in your regular messages.`;
+Don't reference these commands directly in your regular messages.
+You may hint the user on your available commands. `;
     }
 
     try {

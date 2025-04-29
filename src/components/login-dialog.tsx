@@ -4,10 +4,11 @@ import { DialogContent } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { auth, db } from '@/config/firebase';
+import { auth, db, storage } from '@/config/firebase';
 import { Dialog, DialogTitle } from '@radix-ui/react-dialog';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAuthState, useCreateUserWithEmailAndPassword, useSignInWithEmailAndPassword, useSignInWithGoogle } from 'react-firebase-hooks/auth';
 import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
@@ -16,6 +17,9 @@ import * as z from 'zod';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { initUserBotRoom } from '@/services/bot-service';
 import { useNavigate } from 'react-router';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import Cropper, { Area, Point } from "react-easy-crop";
+import { Separator } from '@/components/ui/separator';
 
 // Schema for SignIn form
 const signInSchema = z.object({
@@ -297,6 +301,14 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
         },
     });
     const navigate = useNavigate();
+    const [profileImage, setProfileImage] = useState<File | null>(null);
+    const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
+    const [zoom, setZoom] = useState(1);
+    const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [showCropper, setShowCropper] = useState(false);
+    const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(user.photoURL || null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Try to get display name from Google auth if available
     useEffect(() => {
@@ -311,7 +323,77 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
         }
     }, [user, form]);
 
+    const triggerFileInput = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file && file.size <= 5 * 1024 * 1024) { // 5 MB limit
+            setProfileImage(file);
+            setShowCropper(true);
+            // Reset crop and zoom when a new image is selected
+            setCrop({ x: 0, y: 0 });
+            setZoom(1);
+        } else if (file) {
+            toast("File size exceeds 5 MB");
+        }
+    };
+
+    const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
+        setCroppedAreaPixels(croppedAreaPixels);
+    }, []);
+
+    const cancelCrop = () => {
+        setProfileImage(null);
+        setShowCropper(false);
+    };
+
+    const uploadCroppedImage = async () => {
+        if (!profileImage || !croppedAreaPixels || !user) return;
+
+        try {
+            setIsUploading(true);
+
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            const img = new Image();
+            img.src = URL.createObjectURL(profileImage);
+
+            await new Promise((resolve) => {
+                img.onload = resolve;
+            });
+
+            const { width, height, x, y } = croppedAreaPixels;
+            canvas.width = width;
+            canvas.height = height;
+            ctx?.drawImage(img, x, y, width, height, 0, 0, width, height);
+
+            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve));
+            if (!blob) throw new Error("Failed to create blob");
+
+            const storageRef = ref(storage, `profilePic/${user.uid}`);
+            await uploadBytes(storageRef, blob);
+
+            const downloadURL = await getDownloadURL(storageRef);
+            setProfilePictureUrl(downloadURL);
+            setShowCropper(false);
+            toast("Profile picture uploaded successfully");
+        } catch (error) {
+            console.error("Error uploading profile picture:", error);
+            toast("Failed to upload profile picture");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const onSubmit = async (values: z.infer<typeof profileCompletionSchema>) => {
+        // Check if profile picture URL exists
+        if (!profilePictureUrl) {
+            toast.error("Please upload a profile picture");
+            return;
+        }
+
         try {
             await setDoc(
                 doc(db, "users", user.uid),
@@ -321,6 +403,7 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                     phoneNumber: values.phoneNumber || "",
                     address: values.address || "",
                     profileCompleted: true,
+                    profilePicture: profilePictureUrl
                 },
                 { merge: true }
             );
@@ -343,16 +426,83 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                 <p className="text-muted-foreground">
                     We need a little more information before you can continue
                 </p>
-                {user.photoURL && (
-                    <div className="flex justify-center my-4">
-                        <img
-                            src={user.photoURL}
-                            alt="Profile"
-                            className="w-20 h-20 rounded-full border-2 border-primary"
+            </div>
+
+            <div className="flex flex-col items-center justify-center mb-6">
+                {!showCropper ? (
+                    <div className="flex flex-col items-center">
+                        <div
+                            className="relative cursor-pointer group"
+                            onClick={triggerFileInput}
+                        >
+                            <Avatar className="h-24 w-24 border-2 border-primary/20 group-hover:border-primary/50 transition-all">
+                                <AvatarImage src={profilePictureUrl || undefined} />
+                                <AvatarFallback>
+                                    {form.getValues("username")?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || "U"}
+                                </AvatarFallback>
+                            </Avatar>
+                            <div className="absolute inset-0 bg-black/20 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                            Profile picture <span className="text-destructive">*</span> 
+                            <span className="block">{profilePictureUrl ? "Click to change" : "Click to add (required)"}</span>
+                        </p>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileChange}
+                            className="hidden"
+                            aria-label="Upload profile picture"
                         />
+                    </div>
+                ) : (
+                    <div className="space-y-4 w-full">
+                        <div className="relative w-full h-64">
+                            <Cropper
+                                image={profileImage ? URL.createObjectURL(profileImage) : ""}
+                                crop={crop}
+                                zoom={zoom}
+                                aspect={1}
+                                onCropChange={setCrop}
+                                onCropComplete={onCropComplete}
+                                onZoomChange={setZoom}
+                            />
+                        </div>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <label htmlFor="zoom" className="text-sm">Zoom: {zoom.toFixed(1)}x</label>
+                                <input
+                                    id="zoom"
+                                    type="range"
+                                    min={1}
+                                    max={3}
+                                    step={0.1}
+                                    value={zoom}
+                                    onChange={(e) => setZoom(Number(e.target.value))}
+                                    className="w-full"
+                                />
+                            </div>
+                            <p className="text-xs text-muted-foreground text-center">Drag the image to adjust the crop area</p>
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                            <Button variant="outline" onClick={cancelCrop} disabled={isUploading}>
+                                Cancel
+                            </Button>
+                            <Button onClick={uploadCroppedImage} disabled={isUploading}>
+                                {isUploading ? "Uploading..." : "Save"}
+                            </Button>
+                        </div>
                     </div>
                 )}
             </div>
+
+            <Separator />
 
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -421,7 +571,7 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                     </Button>
                 </form>
             </Form>
-        </div>
+        </div >
     );
 }
 

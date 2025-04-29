@@ -28,6 +28,8 @@ import MessageSearch from "@/components/message-search";
 import { generateAndSendBotResponses, processSystemCommands } from '@/services/bot-service';
 import { useLoveContext } from '@/components/love-provider';
 import { useNavigate, useParams } from "react-router";
+import { uploadFileToStorage } from "@/services/storage-service";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export const dynamic = 'force-dynamic';
 
@@ -39,29 +41,31 @@ const AttachmentViewerDialog = ({ attachment, children }: { attachment: Attachme
                     {children}
                 </div>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl w-full">
-                <div className="flex flex-col items-center justify-center bg-card p-4 rounded-md w-full">
-                    {attachment.type === "image" && (
-                        <img
-                            src={attachment.url}
-                            alt={attachment.name}
-                            className="max-h-[90vh] max-w-[90vw] rounded-md object-contain"
-                        />
-                    )}
-                    {attachment.type === "video" && (
-                        <video
-                            src={attachment.url}
-                            controls
-                            className="max-h-[90vh] max-w-[90vw] rounded-md"
-                        />
-                    )}
-                    {attachment.type === "gif" && (
-                        <img
-                            src={attachment.url}
-                            alt={attachment.name}
-                            className="max-h-[90vh] max-w-[90vw] rounded-md object-contain"
-                        />
-                    )}
+            <DialogContent className="max-w-5xl w-full p-0 border-none overflow-hidden bg-transparent shadow-xl">
+                <div className="flex items-center justify-center h-full w-full">
+                    <div className="bg-card rounded-lg shadow-lg overflow-hidden max-h-[80vh] max-w-[80vw]">
+                        {attachment.type === "image" && (
+                            <img
+                                src={attachment.url}
+                                alt={attachment.name}
+                                className="rounded-md object-contain"
+                            />
+                        )}
+                        {attachment.type === "video" && (
+                            <video
+                                src={attachment.url}
+                                controls
+                                className="rounded-md"
+                            />
+                        )}
+                        {attachment.type === "gif" && (
+                            <img
+                                src={attachment.url}
+                                alt={attachment.name}
+                                className="rounded-md object-contain"
+                            />
+                        )}
+                    </div>
                 </div>
             </DialogContent>
         </Dialog>
@@ -77,7 +81,6 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
 
     // Add state for notification permission
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(null);
-    const [lastMessageId, setLastMessageId] = useState<string | null>(null);
     const [windowFocused, setWindowFocused] = useState<boolean>(true);
 
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -171,40 +174,6 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
         }
     }, []);
 
-    // Check for new messages and show notifications
-    useEffect(() => {
-        if (messages.length === 0 || loadingUser || !user) return;
-
-        const latestMessage = messages[messages.length - 1];
-
-        // If this is a new message, not from the current user, and window is not focused
-        if (
-            latestMessage &&
-            latestMessage.id !== lastMessageId &&
-            latestMessage.user.id !== user.uid &&
-            !windowFocused &&
-            notificationPermission === "granted"
-        ) {
-            // Create and show notification
-            const notification = new Notification(`${latestMessage.user.username} in ${room?.title}`, {
-                body: latestMessage.content || 'Sent an attachment',
-                icon: latestMessage.user.profilePicture || '/favicon.ico',
-            });
-
-            notification.onclick = () => {
-                window.focus();
-                notification.close();
-                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-            };
-
-            // Update last message ID
-            setLastMessageId(latestMessage.id);
-        } else if (latestMessage && latestMessage.id !== lastMessageId) {
-            // Just update the last seen message ID if it's a new message but we don't need to notify
-            setLastMessageId(latestMessage.id);
-        }
-    }, [messages, user, loadingUser, windowFocused, notificationPermission, room, lastMessageId]);
-
     // Handle bot responses
     useEffect(() => {
         if (!room) return;
@@ -239,19 +208,32 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
         }
     }, [messages, room, loading, user, roomId]);
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file) return
-        setUploadingFile(true)
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
+        const file = e.target.files?.[0];
+        if (!file || !user) return;
+
+        setUploadingFile(true);
         try {
-            // your upload logic here, e.g.:
-            // await uploadFileToStorage(file)
+            // Upload file to Firebase Storage
+            const uploadedFile = await uploadFileToStorage(file, roomId, user.uid);
+
+            // Send message with attachment
+            await sendMessage({
+                content: `Sent ${type}: ${file.name}`,
+                attachments: [uploadedFile],
+            });
+
+            toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} uploaded successfully`);
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        } catch (error) {
+            console.error("Error uploading file:", error);
+            toast.error(`Failed to upload ${type}`);
         } finally {
-            setUploadingFile(false)
-            // reset input so same file can be re‑selected
-            setFileInputKey(Date.now())
+            setUploadingFile(false);
+            setFileInputKey(Date.now());
         }
-    }
+    };
+
     const handleDeleteMessage = async (messageId: string) => {
         await deleteMessage(messageId);
         toast("Message deleted");
@@ -261,6 +243,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!newMessage.trim()) return
+
         try {
             await sendMessage({
                 content: newMessage,
@@ -661,6 +644,89 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                     />
 
                     <div className="flex items-center gap-1">
+                        {/* File attachment button with proper dropdown menu */}
+                        <DropdownMenu>
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-10 w-10 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                                                    <path d="M12 5v14" />
+                                                    <path d="M5 12h14" />
+                                                </svg>
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Add attachment</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+
+                            <DropdownMenuContent align="end" className="w-56">
+                                <DropdownMenuLabel>Attach</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+
+                                {/* Image upload option */}
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'image/*';
+                                        input.onchange = (e) => handleFileUpload(e as unknown as React.ChangeEvent<HTMLInputElement>, 'image');
+                                        input.click();
+                                    }}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 mr-2">
+                                        <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                                        <circle cx="9" cy="9" r="2" />
+                                        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                                    </svg>
+                                    <span>Images</span>
+                                </DropdownMenuItem>
+
+                                {/* Video upload option */}
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'video/*';
+                                        input.onchange = (e) => handleFileUpload(e as unknown as React.ChangeEvent<HTMLInputElement>, 'video');
+                                        input.click();
+                                    }}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 mr-2">
+                                        <path d="m22 8-6 4 6 4V8Z" />
+                                        <rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+                                    </svg>
+                                    <span>Videos</span>
+                                </DropdownMenuItem>
+
+                                {/* File upload option */}
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.onchange = (e) => handleFileUpload(e as unknown as React.ChangeEvent<HTMLInputElement>, 'file');
+                                        input.click();
+                                    }}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 mr-2">
+                                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                    </svg>
+                                    <span>Files</span>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>

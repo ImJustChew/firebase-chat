@@ -32,6 +32,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [unreadRooms, setUnreadRooms] = useState<Record<string, boolean>>({});
   const initializedRoomsRef = useRef<Set<string>>(new Set());
   const previousRoomsRef = useRef<Record<string, any>>({});
+  const [lastMessageIds, setLastMessageIds] = useState<Record<string, string>>({});
+  const [windowFocused, setWindowFocused] = useState<boolean>(true);
 
   const isMobile = useIsMobile();
   const pathname = useLocation();
@@ -47,6 +49,21 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
 
   const roomId = pathname.pathname.split("/")[1];
+
+  // Check if window is focused for notification purposes
+  useEffect(() => {
+    if (typeof window === "undefined") return; // Ensure this runs only in the browser
+    const handleFocus = () => setWindowFocused(true);
+    const handleBlur = () => setWindowFocused(false);
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
   useEffect(() => {
     if (roomId) {
@@ -66,7 +83,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         teaser: room.teaser ? {
           timestamp: room.teaser.timestamp?.toDate().getTime(),
           content: room.teaser.content,
-          userId: room.teaser.user?.id
+          userId: room.teaser.user?.id,
+          id: room.teaser.id // Store the teaser ID for comparison
         } : null
       };
 
@@ -91,14 +109,48 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
       if (room.teaser &&
         prevRoomData &&
-        room.teaser.timestamp &&
         (!prevRoomData.teaser ||
-          prevRoomData.teaser.timestamp !== room.teaser.timestamp?.toDate().getTime()) &&
+          prevRoomData.teaser.id !== room.teaser.id) &&
         room.teaser.user?.id !== userAuth.uid &&
         room.id !== roomId) {
+        console.log(`New message in room ${room.id}:`, room.teaser);
 
+        // Mark as unread
         newUnreadState[room.id] = true;
         hasChanges = true;
+
+        // Show notification if permission is granted and window not focused
+        if (typeof window !== "undefined" &&
+          "Notification" in window &&
+          Notification.permission === "granted" &&
+          !windowFocused) {
+
+          // Check if this message has already been notified
+          const messageId = room.teaser.id;
+
+          // Check if this is a bot message (user ID ends with _bot)
+          const isFromBot = room.teaser.user?.id?.includes('_bot');
+
+          if (messageId && lastMessageIds[room.id] !== messageId) {
+            // Create and show notification
+            const notification = new Notification(`${room.teaser.user?.username || 'Someone'} in ${room.title}`, {
+              body: room.teaser.content || 'Sent an attachment',
+              icon: room.teaser.user?.profilePicture || '/favicon.ico',
+            });
+
+            notification.onclick = () => {
+              window.focus();
+              notification.close();
+              navigate(`/${room.id}`);
+            };
+
+            // Update last message ID for this room
+            setLastMessageIds(prev => ({
+              ...prev,
+              [room.id]: messageId
+            }));
+          }
+        }
       }
     });
 
@@ -112,12 +164,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         teaser: room.teaser ? {
           timestamp: room.teaser.timestamp?.toDate().getTime(),
           content: room.teaser.content,
-          userId: room.teaser.user?.id
+          userId: room.teaser.user?.id,
+          id: room.teaser.id // Store the teaser ID for comparison
         } : null
       };
     });
     previousRoomsRef.current = updatedRoomsMap;
-  }, [rooms, user, roomId, unreadRooms]);
+  }, [rooms, user, roomId, unreadRooms, userAuth, windowFocused, lastMessageIds, navigate]);
 
   const fuse = useMemo(() => new Fuse(rooms, {
     keys: ['title', 'teaser.content', 'teaser.user.username'],

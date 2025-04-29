@@ -135,7 +135,7 @@ export default function CreateChatDialog({
                 </DialogHeader>
 
                 {/* Bot Chat Creation Button */}
-                <div className="bg-muted/50 rounded-lg p-4 mb-4">
+                <div className="bg-muted/50 rounded-lg p-4">
                     <div className="flex items-start gap-3">
                         <div className="bg-primary/10 p-2 rounded-full">
                             <Bot className="h-6 w-6 text-primary" />

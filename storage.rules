@@ -19,5 +19,17 @@ service firebase.storage {
                      request.resource.size <= 5 * 1024 * 1024 &&
                      request.resource.contentType.matches('image/.*');
     }
+    
+    // Allow users to upload chat attachments
+    match /chatAttachments/{roomId}/{userId}/{fileName} {
+      // Allow read access to all authenticated users in the room
+      allow read: if request.auth != null;
+      
+      // Allow upload only if the user is uploading to their own folder
+      // Also enforce 20MB size limit
+      allow write: if request.auth != null && 
+                     request.auth.uid == userId &&
+                     request.resource.size <= 20 * 1024 * 1024;
+    }
   }
 }

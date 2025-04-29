@@ -449,7 +449,7 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                             </div>
                         </div>
                         <p className="mt-2 text-sm text-muted-foreground">
-                            Profile picture <span className="text-destructive">*</span> 
+                            Profile picture <span className="text-destructive">*</span>
                             <span className="block">{profilePictureUrl ? "Click to change" : "Click to add (required)"}</span>
                         </p>
                         <input
@@ -631,7 +631,7 @@ const LoginDialog = () => {
     if (loading || checkingProfile) return null;
 
     return (
-        <Dialog open={open} onOpenChange={setOpen} >
+        <Dialog open={open}>
             <DialogContent className={dialogState === 'profile-completion' ? "sm:max-w-md" : ""} hideCloseButton={true}>
                 <DialogTitle className={dialogState === 'login' ? "hidden" : "sr-only"}>
                     Complete Your Profile

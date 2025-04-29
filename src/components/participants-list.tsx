@@ -30,6 +30,7 @@ import { useBlockUser, useIsUserBlocked, useRoomDoc, useRoomMembers } from '@/ho
 import { BOT_CONFIGS } from "@/services/bot-service"
 import { deleteDoc, doc } from "firebase/firestore"
 import { useNavigate } from "react-router"
+import UserProfileDialog from "./user-profile-dialog" // Import the new UserProfileDialog component
 
 type User = {
     id: string
@@ -75,7 +76,14 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
     };
 
     const handleDeleteRoom = async () => {
-        if (!roomDoc || !roomDoc.bot) return;
+        if (!roomDoc) return;
+
+        // Prevent deletion of romantic_bot rooms
+        if (roomDoc.bot === "romantic_bot") {
+            toast.error("This special room cannot be deleted");
+            setIsDeleteDialogOpen(false);
+            return;
+        }
 
         try {
             await deleteDoc(doc(db, "rooms", roomId));
@@ -145,14 +153,12 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end">
-                                            <DropdownMenuItem>
-                                                <UserPlus className="h-4 w-4 mr-2" />
-                                                <span>Add Friend</span>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem>
-                                                <Shield className="h-4 w-4 mr-2" />
-                                                <span>View Profile</span>
-                                            </DropdownMenuItem>
+                                            <UserProfileDialog userId={participant.id} onBlock={onBlockUser}>
+                                                <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                                                    <Shield className="h-4 w-4 mr-2" />
+                                                    <span>View Profile</span>
+                                                </DropdownMenuItem>
+                                            </UserProfileDialog>
                                             <DropdownMenuSeparator />
                                             <DropdownMenuItem
                                                 onClick={() => handleBlockUser(participant.id)}
@@ -185,37 +191,41 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
                 </div>
             </ScrollArea>
 
-            {roomDoc && roomDoc.bot && (
-                <>
-                    <div className="p-3 border-t">
-                        <Button
-                            variant="destructive"
-                            className="w-full"
-                            onClick={() => setIsDeleteDialogOpen(true)}
-                        >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete Room
-                        </Button>
-                    </div>
+            {/* Show delete button for all rooms, but disable for romantic_bot rooms */}
+            <>
+                <div className="p-3 border-t">
+                    <Button
+                        variant="destructive"
+                        className="w-full"
+                        onClick={() => setIsDeleteDialogOpen(true)}
+                        disabled={roomDoc?.bot === "romantic_bot"}
+                        title={roomDoc?.bot === "romantic_bot" ? "This special room cannot be deleted" : "Delete Room"}
+                    >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete Room
+                    </Button>
+                </div>
 
-                    <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    This will permanently delete your chat room with {roomDoc.bot && BOT_CONFIGS[roomDoc.bot].name} and remove all associated messages. This action cannot be undone.
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={handleDeleteRoom} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                                    Delete
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                </>
-            )}
+                <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                {roomDoc?.bot ?
+                                    `This will permanently delete your chat room with ${BOT_CONFIGS[roomDoc.bot].name} and remove all associated messages.` :
+                                    "This will permanently delete your chat room and remove all associated messages."
+                                } This action cannot be undone.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleDeleteRoom} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Delete
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+            </>
         </div>
     )
 }

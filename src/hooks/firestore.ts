@@ -1,9 +1,47 @@
-import { auth, db } from "@/config/firebase";
+import { auth, db, storage } from "@/config/firebase";
 import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { useState, useEffect } from "react";
 import { BotConfig } from "@/services/bot-service";
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+// Function to upload file to Firebase Storage
+export const uploadFileToStorage = async (
+    file: File,
+    roomId: string,
+    userId: string
+): Promise<Attachment> => {
+    // Create a unique filename
+    const timestamp = Date.now();
+    const fileName = `${timestamp}_${file.name}`;
+
+    // Create storage reference
+    const fileRef = ref(storage, `chatAttachments/${roomId}/${userId}/${fileName}`);
+
+    // Upload file
+    await uploadBytes(fileRef, file);
+
+    // Get download URL
+    const url = await getDownloadURL(fileRef);
+
+    // Determine file type
+    let fileType = 'file';
+    if (file.type.startsWith('image/')) {
+        fileType = 'image';
+    } else if (file.type.startsWith('video/')) {
+        fileType = 'video';
+    }
+
+    // Return attachment object to be saved in Firestore
+    return {
+        id: timestamp.toString(),
+        type: fileType,
+        url: url,
+        name: file.name,
+        size: file.size,
+    };
+};
 
 export type User = {
     id: string
@@ -43,6 +81,13 @@ const userConverter: FirestoreDataConverter<User> = {
 export const useUserDoc = () => {
     const [user, loading, error] = useAuthState(auth);
     return useDocumentData(user ? doc(db, "users", user.uid).withConverter(userConverter) : undefined, {
+        snapshotListenOptions: { includeMetadataChanges: true },
+    });
+}
+
+// New hook to get user document by ID with real-time updates
+export const useUserDocById = (userId?: string) => {
+    return useDocumentData(userId ? doc(db, "users", userId).withConverter(userConverter) : undefined, {
         snapshotListenOptions: { includeMetadataChanges: true },
     });
 }

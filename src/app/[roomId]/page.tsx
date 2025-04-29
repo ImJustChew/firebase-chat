@@ -22,12 +22,12 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useParams, useRouter } from "next/navigation";
 import GifPicker from "@/components/gif-picker";
 import ParticipantsList from "@/components/participants-list";
 import MessageSearch from "@/components/message-search";
 import { generateAndSendBotResponses, processSystemCommands } from '@/services/bot-service';
 import { useLoveContext } from '@/components/love-provider';
+import { useNavigate, useParams } from "react-router";
 
 export const dynamic = 'force-dynamic';
 
@@ -89,7 +89,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     const [showParticipants, setShowParticipants] = useState<boolean>(false)
     const [isBotTyping, setIsBotTyping] = useState<boolean>(false);
 
-    const router = useRouter();
+    const navigate = useNavigate();
     const { trackMessageToOthers } = useLoveContext();
 
     const sendMessage = useSendMessage(roomId);
@@ -123,9 +123,9 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
     useEffect(() => {
         if (loadingRoom) return;
         if (!room && !loadingRoom) {
-            router.push("/");
+            navigate("/");
         }
-    }, [room, loadingRoom, router]);
+    }, [room, loadingRoom, navigate]);
 
     // Request notification permission
     const requestNotificationPermission = async () => {
@@ -312,7 +312,7 @@ const MessagesPage = ({ roomId }: { roomId: string }) => {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 mr-1"
-                        onClick={() => router.push(`/`)} // Navigate back to the rooms list
+                        onClick={() => navigate(`/`)} // Navigate back to the rooms list
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"

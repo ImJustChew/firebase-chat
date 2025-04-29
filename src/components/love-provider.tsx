@@ -11,9 +11,9 @@ import { useRoomMessagesCol, useRoomsCol } from "@/hooks/firestore";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { collection, query, where, getDocs, limit } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
-import { useRouter } from 'next/navigation';
 import { Content } from "firebase/vertexai";
 import { PenaltyDialog } from "@/components/penalty-dialog";
+import { useNavigate } from "react-router";
 
 // Constants
 const SHUT_UP_DEBUG = false; // Set to false to enable romantic bot
@@ -77,7 +77,7 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const hasLoadedTeasersRef = useRef(false);
 
     // Hooks
-    const router = useRouter();
+    const navigate = useNavigate();
     const [rooms = []] = useRoomsCol();
     const [messages = []] = useRoomMessagesCol(romanticBotRoomId);
 
@@ -391,7 +391,7 @@ IMPORTANT: You can use system commands if needed. Available commands:
             });
             const messages = splitIntoMultipleMessages(result.response.text());
             await sendProcessedBotMessages(romanticBotRoomId, "romantic_bot", messages);
-            if (!window.location.pathname.includes(romanticBotRoomId)) router.push(`/${romanticBotRoomId}`);
+            if (!window.location.pathname.includes(romanticBotRoomId)) navigate(`/${romanticBotRoomId}`);
         } catch (error) {
             console.error("Error generating neglect message:", error);
         } finally {

@@ -18,9 +18,9 @@ import { auth, db } from "@/config/firebase"
 import { Ban, Bot } from "lucide-react"
 import { toast } from "sonner"
 import { initUserBotRoom } from "@/services/bot-service"
-import { useRouter } from 'next/navigation'
 import { useLoveContext } from './love-provider'
 import { doc, getDoc } from "firebase/firestore"
+import { useNavigate } from "react-router"
 
 export default function CreateChatDialog({
     children,
@@ -34,7 +34,7 @@ export default function CreateChatDialog({
     const [users = [], loading, error] = useUsersCol();
     const [user] = useAuthState(auth);
     const isUserBlocked = useIsUserBlocked();
-    const router = useRouter();
+    const navigate = useNavigate();
     const { handleNewRoomCreated, handleNewBotChatAdded } = useLoveContext();
 
     // Filter out the current user but keep blocked users visible
@@ -60,7 +60,7 @@ export default function CreateChatDialog({
             setOpen(false);
 
             // Navigate to the new room
-            router.push(`/${roomId}`);
+            navigate(`/${roomId}`);
         } catch (error) {
             console.error("Error creating chat:", error);
             toast.error("Failed to create chat room");
@@ -109,7 +109,7 @@ export default function CreateChatDialog({
 
                     setCreatingBotChat(false); // Reset state before navigation
                     setOpen(false); // Close the dialog first
-                    router.push(`/${roomId}`); // Then navigate
+                    navigate(`/${roomId}`); // Then navigate
                 }
             );
         } catch (error) {

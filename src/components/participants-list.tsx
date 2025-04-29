@@ -29,7 +29,7 @@ import { auth, db } from "@/config/firebase"
 import { useBlockUser, useIsUserBlocked, useRoomDoc, useRoomMembers } from '@/hooks/firestore';
 import { BOT_CONFIGS } from "@/services/bot-service"
 import { deleteDoc, doc } from "firebase/firestore"
-import { useRouter } from "next/navigation"
+import { useNavigate } from "react-router"
 
 type User = {
     id: string
@@ -52,7 +52,7 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
     const blockUser = useBlockUser();
     const isUserBlocked = useIsUserBlocked();
     const [roomDoc] = useRoomDoc(roomId)
-    const router = useRouter();
+    const navigate = useNavigate();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
     const [participants = [], loading, error] = useRoomMembers(roomId)
@@ -81,7 +81,7 @@ export default function ParticipantsList({ roomId, onClose, onBlockUser }: Parti
             await deleteDoc(doc(db, "rooms", roomId));
             toast.success("Room deleted successfully");
             if (onClose) onClose();
-            router.push("/dashboard");
+            navigate("/");
         } catch (error) {
             console.error("Error deleting room:", error);
             toast.error("Failed to delete room");

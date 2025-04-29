@@ -1,6 +1,4 @@
 'use client'
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner"
 import { SidebarProvider, SidebarInset, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarInput, SidebarFooter } from '@/components/ui/sidebar';
 import Fuse from 'fuse.js';
@@ -14,10 +12,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { useRoomsCol, useUserDoc } from '@/hooks/firestore';
 import { LogOut, Moon, Plus, Settings, Sun } from 'lucide-react';
 import CreateChatDialog from '@/components/create-chat-dialog';
-import Link from "next/link";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import ProfileDialog from "@/components/profile-dialog";
@@ -25,11 +21,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-ch
 import { LoveProvider } from "@/components/love-provider";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { SYSTEM_COMMAND_REGEX } from "@/services/bot-service";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [unsortedRoom = [], loading, error] = useRoomsCol();
@@ -42,8 +34,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const previousRoomsRef = useRef<Record<string, any>>({});
 
   const isMobile = useIsMobile();
-  const pathname = usePathname();
-  const router = useRouter();
+  const pathname = useLocation();
+  const navigate = useNavigate();
 
   const rooms = unsortedRoom.sort((a, b) => {
     if (!a.teaser && b.teaser) return -1;
@@ -54,7 +46,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     return 0;
   });
 
-  const roomId = pathname.split("/")[1];
+  const roomId = pathname.pathname.split("/")[1];
 
   useEffect(() => {
     if (roomId) {
@@ -141,9 +133,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   useEffect(() => {
     if (rooms.length > 0 && !roomId && !isMobile) {
-      router.push(`/${rooms[0].id}`);
+      navigate(`/${rooms[0].id}`);
     }
-  }, [rooms, roomId, router, isMobile]);
+  }, [rooms, roomId, navigate, isMobile]);
 
   const formatMessageContent = (content: string): string => {
     if (!content) return content;
@@ -184,8 +176,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarGroupContent>
             {filteredRooms.length > 0 ? (
               filteredRooms.map((room) => (
-                <Link
-                  href={`/${room.id}`}
+                <NavLink
+                  to={`/${room.id}`}
                   key={room.id}
                   className="flex flex-col items-start gap-1 whitespace-nowrap border-b p-3 text-sm leading-tight last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground relative"
                 >
@@ -206,7 +198,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       It's kinda chilly here...
                     </span>
                   )}
-                </Link>
+                </NavLink>
               ))
             ) : (
               <div className="flex items-center justify-center p-4 text-sm text-muted-foreground">
@@ -262,46 +254,36 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   )
 }
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout() {
 
   useEffect(() => {
     const appCheck = initializeAppCheck(app, {
       provider: new ReCaptchaEnterpriseProvider(
-        process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || ''
+        import.meta.env.VITE_RECAPTCHA_SITE_KEY || ''
       ),
       isTokenAutoRefreshEnabled: true,
     })
+
   }, []);
 
   return (
-    <html lang="en">
-      <body
-        suppressHydrationWarning={true}
-        className={`${inter.variable} antialiased`}
-      >
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-          <LoveProvider>
-            <SidebarProvider
-              style={
-                {
-                  "--sidebar-width": "280px",
-                } as React.CSSProperties
-              }
-            >
-              <AppSidebar />
-              <LoginDialog />
-              <SidebarInset className="max-h-screen">
-                {children}
-              </SidebarInset>
-            </SidebarProvider>
-          </LoveProvider>
-          <Toaster />
-        </ThemeProvider>
-      </body>
-    </html >
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+      <LoveProvider>
+        <SidebarProvider
+          style={
+            {
+              "--sidebar-width": "280px",
+            } as React.CSSProperties
+          }
+        >
+          <AppSidebar />
+          <LoginDialog />
+          <SidebarInset className="max-h-screen">
+            <Outlet />
+          </SidebarInset>
+        </SidebarProvider>
+      </LoveProvider>
+      <Toaster />
+    </ThemeProvider>
   );
 }

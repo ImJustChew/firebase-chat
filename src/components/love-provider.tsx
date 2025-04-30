@@ -7,7 +7,7 @@ import {
     splitIntoMultipleMessages,
     sendProcessedBotMessages
 } from "@/services/bot-service";
-import { useRoomMessagesCol, useRoomsCol } from "@/hooks/firestore";
+import { useRoomMessagesCol, useRoomsCol, useUserDoc } from "@/hooks/firestore";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { collection, query, where, getDocs, limit } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
@@ -80,6 +80,19 @@ export function LoveProvider({ children }: { children: React.ReactNode }) {
     const navigate = useNavigate();
     const [rooms = []] = useRoomsCol();
     const [messages = []] = useRoomMessagesCol(romanticBotRoomId);
+    const [userDoc, loadingUserDoc] = useUserDoc();
+    const [isNewUser, setIsNewUser] = useState(true);
+
+    // if userDoc loaded, user exists, but userDoc is empty, set isNewUser to true
+    useEffect(() => {
+        if (!loadingUserDoc && userDoc) {
+            if (userDoc) {
+                setIsNewUser(false);
+            } else {
+                setIsNewUser(true);
+            }
+        }
+    }, [loadingUserDoc, userDoc]);
 
     // Memoized Values
     const lastFiveMessages = useMemo(() => messages.slice(-5), [messages]);
@@ -428,7 +441,7 @@ IMPORTANT: You can use system commands if needed. Available commands:
     /** Handles welcome back and neglect logic */
     useEffect(() => {
         if (!user || !romanticBotRoomId || !messages.length || SHUT_UP_DEBUG) return;
-        if (isFirstLoad) {
+        if (isFirstLoad && !isNewUser) {
             setIsFirstLoad(false);
             if (!hasShownWelcomeBack && !isPenaltyActive) setTimeout(sendWelcomeBackMessage, 2000);
             return;

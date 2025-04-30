@@ -538,7 +538,7 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                                 <FormControl>
                                     <Input
                                         type="tel"
-                                        placeholder="+1 (555) 123-4567"
+                                        placeholder="+886 912 345 678"
                                         {...field}
                                         className="bg-accent border-none"
                                     />
@@ -556,7 +556,7 @@ function ProfileCompletionForm({ user, onProfileComplete }: { user: any; onProfi
                                 <FormLabel className="text-sm font-medium">ADDRESS (OPTIONAL)</FormLabel>
                                 <FormControl>
                                     <Input
-                                        placeholder="123 Main St, Anytown, AN"
+                                        placeholder="Hsinchu, Taiwan"
                                         {...field}
                                         className="bg-accent border-none"
                                     />

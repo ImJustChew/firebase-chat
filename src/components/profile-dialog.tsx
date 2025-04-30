@@ -95,7 +95,7 @@ function ProfileEditor() {
                     type="tel"
                     value={formData.phoneNumber}
                     onChange={handleChange}
-                    placeholder="+1 (555) 123-4567"
+                    placeholder="+886 912 345 678"
                 />
             </div>
 
@@ -106,7 +106,7 @@ function ProfileEditor() {
                     name="address"
                     value={formData.address}
                     onChange={handleChange}
-                    placeholder="123 Main St, City, Country"
+                    placeholder="Hsinchu, Taiwan"
                 />
             </div>
 

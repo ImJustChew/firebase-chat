@@ -1,10 +1,81 @@
 import { auth, db, storage } from "@/config/firebase";
-import { doc, FirestoreDataConverter, collection, query, Timestamp, setDoc, orderBy, getDoc, where, FieldPath, documentId, updateDoc, arrayUnion, arrayRemove, getDocs, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import {
+    doc,
+    FirestoreDataConverter,
+    collection,
+    query,
+    Timestamp,
+    setDoc,
+    orderBy,
+    getDoc,
+    where,
+    documentId,
+    updateDoc,
+    arrayUnion,
+    arrayRemove,
+    getDocs,
+    addDoc,
+    serverTimestamp,
+    deleteDoc,
+} from 'firebase/firestore';
 import { useAuthState } from "react-firebase-hooks/auth"
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
-import { useState, useEffect } from "react";
 import { BotConfig } from "@/services/bot-service";
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { toast } from "sonner";
+import { FirebaseError } from "firebase/app";
+
+/**
+ * A hook for standardized Firestore error handling
+ * @param error Firebase error object
+ * @returns Object with the formatted error message and a function to display the error
+ */
+export const useFirestoreErrorHandler = () => {
+    const handleError = (error: FirebaseError | Error | unknown, customMessage?: string) => {
+        if (!error) return;
+
+        let errorMessage = "An unknown error occurred";
+
+        if (error instanceof FirebaseError) {
+            // Handle specific Firebase error codes
+            switch (error.code) {
+                case 'permission-denied':
+                    errorMessage = "You don't have permission to perform this action";
+                    break;
+                case 'not-found':
+                    errorMessage = "The requested document was not found";
+                    break;
+                case 'already-exists':
+                    errorMessage = "This document already exists";
+                    break;
+                case 'resource-exhausted':
+                    errorMessage = "Too many requests. Please try again later";
+                    break;
+                case 'unauthenticated':
+                    errorMessage = "Please sign in to perform this action";
+                    break;
+                case 'unavailable':
+                    errorMessage = "Service temporarily unavailable. Please check your connection";
+                    break;
+                default:
+                    errorMessage = `Firebase error: ${error.message}`;
+                    break;
+            }
+        } else if (error instanceof Error) {
+            errorMessage = error.message;
+        }
+
+        // Show the error message using toast
+        toast.error(customMessage || errorMessage);
+
+        // Also log to console for debugging
+        console.error("Firestore Error:", error);
+
+        return errorMessage;
+    };
+
+    return { handleError };
+};
 
 // Function to upload file to Firebase Storage
 export const uploadFileToStorage = async (
@@ -16,31 +87,37 @@ export const uploadFileToStorage = async (
     const timestamp = Date.now();
     const fileName = `${timestamp}_${file.name}`;
 
-    // Create storage reference
-    const fileRef = ref(storage, `chatAttachments/${roomId}/${userId}/${fileName}`);
+    try {
+        // Create storage reference
+        const fileRef = ref(storage, `chatAttachments/${roomId}/${userId}/${fileName}`);
 
-    // Upload file
-    await uploadBytes(fileRef, file);
+        // Upload file
+        await uploadBytes(fileRef, file);
 
-    // Get download URL
-    const url = await getDownloadURL(fileRef);
+        // Get download URL
+        const url = await getDownloadURL(fileRef);
 
-    // Determine file type
-    let fileType = 'file';
-    if (file.type.startsWith('image/')) {
-        fileType = 'image';
-    } else if (file.type.startsWith('video/')) {
-        fileType = 'video';
+        // Determine file type
+        let fileType = 'file';
+        if (file.type.startsWith('image/')) {
+            fileType = 'image';
+        } else if (file.type.startsWith('video/')) {
+            fileType = 'video';
+        }
+
+        // Return attachment object to be saved in Firestore
+        return {
+            id: timestamp.toString(),
+            type: fileType,
+            url: url,
+            name: file.name,
+            size: file.size,
+        };
+    } catch (error) {
+        console.error("Error uploading file:", error);
+        toast.error("Failed to upload file. Please try again.");
+        throw error;
     }
-
-    // Return attachment object to be saved in Firestore
-    return {
-        id: timestamp.toString(),
-        type: fileType,
-        url: url,
-        name: file.name,
-        size: file.size,
-    };
 };
 
 export type User = {
@@ -274,15 +351,22 @@ export const useUsersCol = () => {
 };
 
 export const createRoom = async (room: Omit<Room, "id">) => {
-    const roomRef = doc(collection(db, "rooms"));
-    await setDoc(roomRef, room);
-    return roomRef.id;
+    try {
+        const roomRef = doc(collection(db, "rooms"));
+        await setDoc(roomRef, room);
+        return roomRef.id;
+    } catch (error) {
+        console.error("Error creating room:", error);
+        toast.error("Failed to create chat room. Please try again.");
+        throw error;
+    }
 }
 
 export const useSendMessage = (roomId: string) => {
     const [user] = useAuthState(auth);
     const [userData] = useUserDoc();
     const profilePicture = userData?.profilePicture || "/placeholder.svg?height=200&width=200";
+    const { handleError } = useFirestoreErrorHandler();
 
     return async (message: Omit<Message, "id" | "user" | "timestamp">) => {
         if (!user) {
@@ -291,23 +375,28 @@ export const useSendMessage = (roomId: string) => {
         if (!userData) {
             throw new Error("User data not found");
         }
-        const username = userData.username;
-        const messageRef = doc(collection(db, "rooms", roomId, "messages"));
-        const messageData: Message = {
-            ...message,
-            id: messageRef.id,
-            timestamp: Timestamp.now(),
-            user: {
-                id: user.uid,
-                username,
-                profilePicture,
-            },
+        try {
+            const username = userData.username;
+            const messageRef = doc(collection(db, "rooms", roomId, "messages"));
+            const messageData: Message = {
+                ...message,
+                id: messageRef.id,
+                timestamp: Timestamp.now(),
+                user: {
+                    id: user.uid,
+                    username,
+                    profilePicture,
+                },
+            }
+            await setDoc(messageRef, messageData);
+            await setDoc(doc(db, "rooms", roomId), {
+                teaser: messageData
+            }, { merge: true });
+            return messageRef.id;
+        } catch (error) {
+            handleError(error, "Failed to send message");
+            throw error;
         }
-        await setDoc(messageRef, messageData);
-        await setDoc(doc(db, "rooms", roomId), {
-            teaser: messageData
-        }, { merge: true });
-        return messageRef.id;
     }
 }
 
@@ -315,6 +404,7 @@ export const useDeleteMessage = (roomId: string) => {
     const [user] = useAuthState(auth);
     const userDoc = useUserDoc();
     const userData = userDoc[0] as User;
+    const { handleError } = useFirestoreErrorHandler();
 
     return async (messageId: string) => {
         if (!user) {
@@ -323,48 +413,62 @@ export const useDeleteMessage = (roomId: string) => {
         if (!userData) {
             throw new Error("User data not found");
         }
-        const userId = user.uid || "";
-        const username = userData.username || "Unknown User";
-        const profilePicture = userData.profilePicture || "/placeholder.svg?height=200&width=200";
 
-        const messageRef = doc(db, "rooms", roomId, "messages", messageId);
-        await setDoc(messageRef, {
-            isDeleted: true,
-            content: "This message has been deleted",
-            user: {
-                id: userId,
-                username,
-                profilePicture,
-            },
-        }, { merge: true });
-        // if teaser is the same as the deleted message, set to message deleted
-        const roomData = await getDoc(doc(db, "rooms", roomId)).then((doc) => doc.data()) as Room;
-        if (roomData?.teaser?.id === messageId) {
-            await setDoc(doc(db, "rooms", roomId), {
-                teaser: {
-                    isDeleted: true,
-                    content: "This message has been deleted",
-                    user: {
-                        id: userId,
-                        username,
-                        profilePicture,
-                    },
-                }
+        try {
+            const userId = user.uid || "";
+            const username = userData.username || "Unknown User";
+            const profilePicture = userData.profilePicture || "/placeholder.svg?height=200&width=200";
+
+            const messageRef = doc(db, "rooms", roomId, "messages", messageId);
+            await setDoc(messageRef, {
+                isDeleted: true,
+                content: "This message has been deleted",
+                user: {
+                    id: userId,
+                    username,
+                    profilePicture,
+                },
             }, { merge: true });
+
+            // if teaser is the same as the deleted message, set to message deleted
+            const roomData = await getDoc(doc(db, "rooms", roomId)).then((doc) => doc.data()) as Room;
+            if (roomData?.teaser?.id === messageId) {
+                await setDoc(doc(db, "rooms", roomId), {
+                    teaser: {
+                        isDeleted: true,
+                        content: "This message has been deleted",
+                        user: {
+                            id: userId,
+                            username,
+                            profilePicture,
+                        },
+                    }
+                }, { merge: true });
+            }
+            return messageRef.id;
+        } catch (error) {
+            handleError(error, "Failed to delete message");
+            throw error;
         }
-        return messageRef.id;
     }
 }
 
 export const useUpdateUserProfile = () => {
     const [user] = useAuthState(auth);
+    const { handleError } = useFirestoreErrorHandler();
+
     return async (data: Partial<User>) => {
         if (!user) {
             throw new Error("User not authenticated");
         }
-        const userId = user.uid;
-        await setDoc(doc(db, "users", userId), data, { merge: true });
-        return userId;
+        try {
+            const userId = user.uid;
+            await setDoc(doc(db, "users", userId), data, { merge: true });
+            return userId;
+        } catch (error) {
+            handleError(error, "Failed to update profile");
+            throw error;
+        }
     }
 }
 
@@ -486,61 +590,73 @@ export async function createBotRoom(
     botConfig: BotConfig,
     skipInitialGreeting: boolean = false
 ): Promise<string> {
-    const roomRef = await addDoc(collection(db, "rooms"), {
-        title: `Chat with ${botConfig.displayName}`,
-        description: `Your personal chat with ${botConfig.displayName}`,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdBy: userId,
-        members: [userId],
-        isPrivate: true,
-        bot: botName // Special property to mark this as a bot room
-    });
-
-    // Add initial greeting message from the bot unless we're skipping it
-    if (!skipInitialGreeting) {
-        await addDoc(collection(db, "rooms", roomRef.id, "messages"), {
-            content: botConfig.greeting,
-            timestamp: serverTimestamp(),
-            user: {
-                id: botName,
-                username: botConfig.displayName,
-                profilePicture: botConfig.profilePicture
-            }
+    try {
+        const roomRef = await addDoc(collection(db, "rooms"), {
+            title: `Chat with ${botConfig.displayName}`,
+            description: `Your personal chat with ${botConfig.displayName}`,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            createdBy: userId,
+            members: [userId],
+            isPrivate: true,
+            bot: botName // Special property to mark this as a bot room
         });
-    }
 
-    return roomRef.id;
+        // Add initial greeting message from the bot unless we're skipping it
+        if (!skipInitialGreeting) {
+            await addDoc(collection(db, "rooms", roomRef.id, "messages"), {
+                content: botConfig.greeting,
+                timestamp: serverTimestamp(),
+                user: {
+                    id: botName,
+                    username: botConfig.displayName,
+                    profilePicture: botConfig.profilePicture
+                }
+            });
+        }
+
+        return roomRef.id;
+    } catch (error) {
+        console.error("Error creating bot room:", error);
+        toast.error("Failed to create bot chat. Please try again later.");
+        throw error;
+    }
 }
 
 // Send a bot message to a room
 export async function sendBotMessage(roomId: string, botName: string, botDisplayName: string, botProfilePicture: string, content: string): Promise<string> {
-    const messageRef = await addDoc(collection(db, "rooms", roomId, "messages"), {
-        content: content,
-        timestamp: Timestamp.now(),
-        user: {
-            id: botName,
-            username: botDisplayName,
-            profilePicture: botProfilePicture
-        }
-    });
-
-    // Update the room teaser
-    await updateDoc(doc(db, "rooms", roomId), {
-        teaser: {
-            id: messageRef.id,
+    try {
+        const messageRef = await addDoc(collection(db, "rooms", roomId, "messages"), {
             content: content,
+            timestamp: Timestamp.now(),
             user: {
                 id: botName,
                 username: botDisplayName,
                 profilePicture: botProfilePicture
-            },
-            timestamp: Timestamp.now()
-        },
-        updatedAt: Timestamp.now()
-    });
+            }
+        });
 
-    return messageRef.id;
+        // Update the room teaser
+        await updateDoc(doc(db, "rooms", roomId), {
+            teaser: {
+                id: messageRef.id,
+                content: content,
+                user: {
+                    id: botName,
+                    username: botDisplayName,
+                    profilePicture: botProfilePicture
+                },
+                timestamp: Timestamp.now()
+            },
+            updatedAt: Timestamp.now()
+        });
+
+        return messageRef.id;
+    } catch (error) {
+        console.error("Error sending bot message:", error);
+        toast.error("Failed to send bot message. Please try again later.");
+        throw error;
+    }
 }
 
 export const useRoomMembers = (roomId: string) => {
@@ -556,7 +672,13 @@ export const useRoomMembers = (roomId: string) => {
 }
 
 export const deleteRoom = async (roomId: string) => {
-    const roomRef = doc(db, "rooms", roomId);
-    await deleteDoc(roomRef);
-    return roomRef.id;
+    try {
+        const roomRef = doc(db, "rooms", roomId);
+        await deleteDoc(roomRef);
+        return roomRef.id;
+    } catch (error) {
+        console.error("Error deleting room:", error);
+        toast.error("Failed to delete chat room. Please try again later.");
+        throw error;
+    }
 }

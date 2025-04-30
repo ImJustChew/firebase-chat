@@ -517,7 +517,7 @@ export async function createBotRoom(
 export async function sendBotMessage(roomId: string, botName: string, botDisplayName: string, botProfilePicture: string, content: string): Promise<string> {
     const messageRef = await addDoc(collection(db, "rooms", roomId, "messages"), {
         content: content,
-        timestamp: serverTimestamp(),
+        timestamp: Timestamp.now(),
         user: {
             id: botName,
             username: botDisplayName,
@@ -535,9 +535,9 @@ export async function sendBotMessage(roomId: string, botName: string, botDisplay
                 username: botDisplayName,
                 profilePicture: botProfilePicture
             },
-            timestamp: serverTimestamp()
+            timestamp: Timestamp.now()
         },
-        updatedAt: serverTimestamp()
+        updatedAt: Timestamp.now()
     });
 
     return messageRef.id;

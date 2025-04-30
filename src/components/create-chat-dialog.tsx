@@ -177,7 +177,7 @@ export default function CreateChatDialog({
                         <Label className="block mb-2">Select Friends</Label>
                         <ScrollArea className="h-60 border rounded-md p-2">
                             {friends.length === 0 ? (
-                                <p className="text-center text-muted-foreground py-4">No friends available. Add friends to create a chat.</p>
+                                <p className="text-center text-muted-foreground py-4">No friends available. More users required</p>
                             ) : (
                                 <div className="space-y-2">
                                     {friends.map((friend) => {

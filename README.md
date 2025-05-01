@@ -2,7 +2,7 @@
 
 A modern, feature-rich chat application built with React, Firebase, and Vite. Connect with friends, create chat rooms, and experience a unique chat environment with AI companions.
 
-![Link to the demo](https://fir-chat-e7e3e.web.app/)
+[Link to the demo](https://fir-chat-e7e3e.web.app/)
 
 ## Features
 

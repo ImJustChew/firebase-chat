@@ -2,6 +2,8 @@
 
 A modern, feature-rich chat application built with React, Firebase, and Vite. Connect with friends, create chat rooms, and experience a unique chat environment with AI companions.
 
+![Link to the demo](https://fir-chat-e7e3e.web.app/)
+
 ## Features
 
 - **User Authentication**: Sign up/login with email or Google
@@ -154,7 +156,7 @@ bun run build
 | Using React          | ✅     | Application built with React and TypeScript           |
 | Third-party Sign In  | ✅     | Google authentication implemented                     |
 | Chrome Notifications | ✅     | Browser notifications for new messages                |
-| CSS Animation        | ✅     | Various animations throughout the interface           |
+| CSS Animation        | ✅     | View`animate-ring` css class                          |
 | Code Handling        | ✅     | Properly escapes and displays code in messages        |
 | User Profile         | ✅     | Customizable user profiles                            |
 | Profile Pictures     | ✅     | User profile picture support                          |
@@ -177,3 +179,7 @@ The application includes some hidden gems for users to discover:
 ## Git History
 
 Regular commits were made throughout the development process, not just on the last day. You can view the complete git history in the repository.
+
+![](assets/20250501_204855_image.png)
+
+![](assets/20250501_204923_image.png)
